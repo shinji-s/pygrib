@@ -380,7 +380,7 @@ cdef class open(object):
         else:
             self._gh = gh
             self.messagenumber = self.messagenumber + 1
-        return _create_gribmessage(self._gh, self.messagenumber)
+        return _create_gribmessage(self._gh, self.messagenumber, True)
     
     def __enter__(self):
         return self
@@ -432,7 +432,7 @@ cdef class open(object):
                 offsets[n] = 0
                 lengths[n] = 0
         gh = kp_grib2_handle_new_from_sections(NULL, self._fd, offsets, lengths, &error)
-        return _create_gribmessage(gh, self.messagenumber)
+        return _create_gribmessage(gh, self.messagenumber, False)
 
     def seek(self, N, from_what=0):
         pass
@@ -475,13 +475,15 @@ def datetime_to_julian(object d):
         raise RuntimeError(grib_get_error_message(err))
     return julday
 
-cdef _create_gribmessage(grib_handle *gh, object messagenumber):
+cdef _create_gribmessage(grib_handle *gh, object messagenumber, dup_handle):
     """factory function for creating gribmessage instances"""
     cdef gribmessage grb  = gribmessage.__new__(gribmessage)
     grb.messagenumber = messagenumber
     grb.expand_reduced = True
-    # grb._gh = grib_handle_clone(gh)
-    grb._gh = gh
+    if dup_handle:
+        grb._gh = grib_handle_clone(gh)
+    else:
+        grb._gh = gh
     grb._all_keys = grb.keys()
     grb._ro_keys  = grb._read_only_keys()
     grb._set_projparams() # set projection parameter dict.
