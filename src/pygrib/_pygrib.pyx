@@ -358,6 +358,7 @@ cdef class open(object):
         kp_grib_load_entire_blob(NULL, self._fd, &err)
         if err:
             raise RuntimeError(grib_get_error_message(err))
+        rewind(self._fd)
 
     def __iter__(self):
         return self
@@ -432,6 +433,10 @@ cdef class open(object):
                 lengths[n] = 0
         gh = kp_grib2_handle_new_from_sections(NULL, self._fd, offsets, lengths, &error)
         return _create_gribmessage(gh, self.messagenumber)
+
+    def seek(self, N, from_what=0):
+        pass
+
 
 # keep track of python gribmessage attributes so they can be
 # distinguished from grib keys.
