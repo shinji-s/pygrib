@@ -421,10 +421,10 @@ cdef class open(object):
         cdef grib_handle * gh
         if N < 1:
             raise IOError('grb message numbers start at 1')
-        num_sections = len(self.message_index[N])
+        num_sections = len(self.message_index[N-1])
         if num_sections != 8:
             raise RuntimeError('There must be exactly 8 sections within a grib2 message')
-        for n, offset_and_length in enumerate(self.message_index[N]):
+        for n, offset_and_length in enumerate(self.message_index[N-1]):
             if offset_and_length:
                 offsets[n] = offset_and_length[0]
                 lengths[n] = offset_and_length[1]
