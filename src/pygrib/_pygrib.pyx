@@ -305,7 +305,7 @@ def get_definitions_path():
     return _eccodes_datadir 
 
 
-cdef long _convert_step_time_unit(long value, long from_unit, long to_unit):
+cpdef long convert_step_time_unit(long value, long from_unit, long to_unit):
     cdef long d_step
     if from_unit == 0:   # Min
         d_step = value * 60
@@ -620,7 +620,7 @@ cdef class open(object):
                 grib_get_long(gh, "step", &forecast_time_step);
                 if step_unit != srcStepUnit:
                     pass
-                    forecast_time_step = _convert_step_time_unit(
+                    forecast_time_step = convert_step_time_unit(
                         forecast_time_step, srcStepUnit, step_unit)
 
             indices_bin.setdefault(forecast_time_step, []).append(msgNum)
