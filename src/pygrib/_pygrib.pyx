@@ -580,14 +580,14 @@ cdef class open(object):
             grib_get_long(gh, "backgroundProcess", &val)
             if val != datakind_id:
                 if ouch_a == 0:
-                    print ('Ouch A!', val)
+                    print ('Trace: Ouch A!', val)
                 ouch_a += 1
                 err = grib_handle_delete(gh)
                 continue
             grib_get_long(gh, "parameterCategory", &val)
             if val != parameter_category:
                 if ouch_b == 0:
-                    print ('Ouch B!', val)
+                    print ('Trace: Ouch B!', val)
                 ouch_b += 1
                 err = grib_handle_delete(gh)
                 continue
@@ -605,8 +605,8 @@ cdef class open(object):
                     i = i + 1
                 if numLevels <= i:
                     if ouch_d == 0:
-                        print ('Ouch D!', levels, val)
-                    couch_d += 1
+                        print ('Trace: Ouch D!', levels, val)
+                    ouch_d += 1
                     err = grib_handle_delete(gh)
                     continue
 
