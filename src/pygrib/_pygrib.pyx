@@ -604,7 +604,7 @@ cdef class open(object):
                     if val == levels_ptr[level_index]:
                         break
                     level_index += 1
-                if numLevels <= i:
+                if numLevels <= level_index:
                     if ouch_d == 0:
                         print ('Trace: Ouch D!', levels, val)
                     ouch_d += 1
