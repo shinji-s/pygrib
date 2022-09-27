@@ -555,7 +555,7 @@ cdef class open(object):
             levels_ptr = levels_array.data.as_ints
 
         cdef long val
-        cdef int i = 0
+        cdef int level_index
         cdef long forecast_time_step
         cdef long srcStepUnit
         indices_bin = {}
@@ -599,10 +599,11 @@ cdef class open(object):
                 continue
             if levels_ptr != NULL:
                 grib_get_long(gh, "level", &val)
-                while i < numLevels:
+                level_index = 0
+                while level_index < numLevels:
                     if val == levels_ptr[i]:
                         break
-                    i = i + 1
+                    level_index += 1
                 if numLevels <= i:
                     if ouch_d == 0:
                         print ('Trace: Ouch D!', levels, val)
