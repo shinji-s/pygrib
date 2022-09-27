@@ -550,7 +550,7 @@ cdef class open(object):
             levels_ptr = NULL;
         else:
             levels_array = array.array('i', levels)
-            num_levels = len(levels)
+            numLevels = len(levels)
             levels_ptr = levels_array.data.as_ints
 
         cdef long val
