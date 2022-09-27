@@ -547,7 +547,6 @@ cdef class open(object):
         cdef array.array levels_array
         if levels is None:
             numLevels = 0
-            levels_pstr = 0;
             levels_ptr = NULL;
         else:
             levels_array = array.array('i', levels)
@@ -606,7 +605,7 @@ cdef class open(object):
                     level_index += 1
                 if numLevels <= level_index:
                     if ouch_d == 0:
-                        print ('Trace: Ouch D!', levels, val)
+                        print ('Trace: Ouch D!', levels, val, level_index, levels_ptr[0], numLevels)
                     ouch_d += 1
                     err = grib_handle_delete(gh)
                     continue
