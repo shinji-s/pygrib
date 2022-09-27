@@ -6,13 +6,17 @@ from datetime import datetime
 import os
 from pathlib import Path
 from pkg_resources import parse_version
+from typing import List
 import warnings
 
 import numpy as np
 cimport numpy as npc
 from numpy import ma
 import pyproj
-import_array()
+
+#import_array()
+from cpython cimport array
+import array
 
 cdef _redtoreg(object nlonsin, npc.ndarray lonsperlat, npc.ndarray redgrid, \
               object missval):
@@ -46,7 +50,7 @@ cdef _redtoreg(object nlonsin, npc.ndarray lonsperlat, npc.ndarray redgrid, \
         flons = <double>ilons
         for i from 0 <= i < nlons:
             # zxi is the grid index (relative to the reduced grid)
-            # of the i'th point on the full grid. 
+            # of the i'th point on the full grid.
             zxi = i * flons / nlons # goes from 0 to ilons
             im = <long>zxi
             zdx = zxi - <double>im
@@ -56,7 +60,7 @@ cdef _redtoreg(object nlonsin, npc.ndarray lonsperlat, npc.ndarray redgrid, \
                 # if one of the nearest values is missing, use nearest
                 # neighbor interpolation.
                 if redgrdptr[indx+im] == missvl or\
-                   redgrdptr[indx+ip] == missvl: 
+                   redgrdptr[indx+ip] == missvl:
                     if zdx < 0.5:
                         reggrdptr[n] = redgrdptr[indx+im]
                     else:
@@ -116,19 +120,19 @@ cdef extern from "grib_api.h":
         GRIB_TYPE_LONG
         GRIB_TYPE_DOUBLE
         GRIB_TYPE_STRING
-        GRIB_TYPE_BYTES 
-        GRIB_TYPE_SECTION 
-        GRIB_TYPE_LABEL 
-        GRIB_TYPE_MISSING 
-        GRIB_KEYS_ITERATOR_ALL_KEYS            
-        GRIB_KEYS_ITERATOR_SKIP_READ_ONLY         
-        GRIB_KEYS_ITERATOR_SKIP_OPTIONAL          
-        GRIB_KEYS_ITERATOR_SKIP_EDITION_SPECIFIC  
-        GRIB_KEYS_ITERATOR_SKIP_CODED             
-        GRIB_KEYS_ITERATOR_SKIP_COMPUTED         
-        GRIB_KEYS_ITERATOR_SKIP_FUNCTION         
-        GRIB_KEYS_ITERATOR_SKIP_DUPLICATES       
-        GRIB_MISSING_LONG 
+        GRIB_TYPE_BYTES
+        GRIB_TYPE_SECTION
+        GRIB_TYPE_LABEL
+        GRIB_TYPE_MISSING
+        GRIB_KEYS_ITERATOR_ALL_KEYS
+        GRIB_KEYS_ITERATOR_SKIP_READ_ONLY
+        GRIB_KEYS_ITERATOR_SKIP_OPTIONAL
+        GRIB_KEYS_ITERATOR_SKIP_EDITION_SPECIFIC
+        GRIB_KEYS_ITERATOR_SKIP_CODED
+        GRIB_KEYS_ITERATOR_SKIP_COMPUTED
+        GRIB_KEYS_ITERATOR_SKIP_FUNCTION
+        GRIB_KEYS_ITERATOR_SKIP_DUPLICATES
+        GRIB_MISSING_LONG
         GRIB_MISSING_DOUBLE
     int grib_get_size(grib_handle *h, char *name, size_t *size)
     int grib_get_native_type(grib_handle *h, char *name, int *type)
@@ -152,7 +156,7 @@ cdef extern from "grib_api.h":
     int grib_keys_iterator_delete( grib_keys_iterator* kiter)
     void grib_multi_support_on(grib_context* c)
     void grib_multi_support_off(grib_context* c)
-    int grib_get_message(grib_handle* h ,  void** message,size_t *message_length)
+    int grib_get_message(grib_handle* h , void ** message, size_t *message_length)
     int grib_get_message_copy(grib_handle* h ,  void* message,size_t *message_length)
     long grib_get_api_version()
     grib_handle* grib_handle_clone(grib_handle* h)
@@ -276,7 +280,7 @@ def set_definitions_path(object eccodes_definition_path):
 if 'ECCODES_DEFINITION_PATH' in os.environ:
     _eccodes_datadir = os.environ['ECCODES_DEFINITION_PATH']
 else:
-    # definitions at level of package dir 
+    # definitions at level of package dir
     _tmp_path = os.path.join('share','eccodes','definitions')
     _definitions_path = os.path.join(os.path.dirname(__file__),_tmp_path)
     # if definitions path exists inside pygrib installation (as it does when installed
@@ -300,8 +304,100 @@ def get_definitions_path():
     global _eccodes_datadir
     return _eccodes_datadir 
 
+
+cdef long _convert_step_time_unit(long value, long from_unit, long to_unit):
+    cdef long d_step
+    if from_unit == 0:   # Min
+        d_step = value * 60
+    elif from_unit == 1: # Hour
+        d_step = value * 3600
+    elif from_unit == 2: # Day
+        d_step = value * 86400
+    elif from_unit == 13:    # Second
+        d_step = value
+    else:
+        d_step = 0 # to remove compilation warning
+        assert False, f"Error: Stepunit '{from_unit}' is not supported."
+    if to_unit == 0:   # Min
+        return d_step // 60
+    elif to_unit == 1: # Hour
+        return d_step // 3600
+    elif to_unit == 2: # Day
+        return d_step // 86400
+    elif to_unit == 13:    # Second
+        return d_step
+    assert False, f"Error: Stepunit '{to_unit}' is not supported."
+
+
+class Params(object):
+
+    def __init__(self):
+        self.upperleft_lat = []
+        self.upperleft_lon = []
+        self.lowerright_lat = []
+        self.lowerright_lon = []
+        self.pixel_width_low_precision = {}
+        self.pixel_height_low_precision = {}
+        self.resolutions = []
+        self.PIXEL_WIDTH = {}
+        self.PIXEL_HEIGHT = {}
+        self.RESOLUTION = ()
+        self.HIGH_RESOLUTION = None
+        self.LOW_RESOLUTION = None
+
+    def update(self, Ni, Nj,
+               latitudeOfFirstGridPointInDegrees,
+               latitudeOfLastGridPointInDegrees,
+               longitudeOfFirstGridPointInDegrees,
+               longitudeOfLastGridPointInDegrees,
+               iDirectionIncrementInDegrees,
+               jDirectionIncrementInDegrees):
+        res = (Ni, Nj)
+        if res not in self.resolutions:
+            self.resolutions.append(res)
+        lat_max = latitudeOfFirstGridPointInDegrees + jDirectionIncrementInDegrees/2
+        lat_min = latitudeOfLastGridPointInDegrees - (jDirectionIncrementInDegrees - jDirectionIncrementInDegrees/2)
+        lon_max = longitudeOfLastGridPointInDegrees + iDirectionIncrementInDegrees/2
+        lon_min = longitudeOfFirstGridPointInDegrees - (iDirectionIncrementInDegrees - iDirectionIncrementInDegrees/2)
+        self.pixel_width_low_precision.setdefault(res, iDirectionIncrementInDegrees)
+        self.pixel_height_low_precision.setdefault(res, jDirectionIncrementInDegrees)
+        if lat_max not in self.upperleft_lat:
+            self.upperleft_lat.append(lat_max)
+            self.lowerright_lat.append(lat_min)
+        if lon_min not in self.upperleft_lon:
+            self.upperleft_lon.append(lon_min)
+            self.lowerright_lon.append(lon_max)
+
+    def calc_pixel_size(self, resolution):
+        Ni = round((self.LOWER_RIGHT_LON - self.UPPER_LEFT_LON
+                    ) / self.pixel_width_low_precision[resolution])
+        Nj = round((self.UPPER_LEFT_LAT - self.LOWER_RIGHT_LAT
+                    ) / self.pixel_height_low_precision[resolution])
+        return ( (self.LOWER_RIGHT_LON - self.UPPER_LEFT_LON) / Ni,
+                 (self.UPPER_LEFT_LAT - self.LOWER_RIGHT_LAT) / Nj )
+
+    def finalize(self):
+        self.UPPER_LEFT_LAT = max(self.upperleft_lat)
+        self.UPPER_LEFT_LON = min(self.upperleft_lon)
+        self.LOWER_RIGHT_LAT = min(self.lowerright_lat)
+        self.LOWER_RIGHT_LON = max(self.lowerright_lon)
+        assert len(self.resolutions) <= 2, "Error: No support for more than 2 resolutions."
+        if len(self.resolutions) == 2:
+            self.HIGH_RESOLUTION = max(self.resolutions, key=(lambda x: x[0]))
+            self.LOW_RESOLUTION = min(self.resolutions, key=(lambda x: x[0]))
+            self.RESOLUTION = self.HIGH_RESOLUTION
+            (self.PIXEL_WIDTH[self.HIGH_RESOLUTION],
+                self.PIXEL_HEIGHT[self.HIGH_RESOLUTION]) = self.calc_pixel_size(self.HIGH_RESOLUTION)
+            self.PIXEL_WIDTH[self.LOW_RESOLUTION] = self.PIXEL_WIDTH[self.HIGH_RESOLUTION] * self.HIGH_RESOLUTION[0]/self.LOW_RESOLUTION[0]
+            self.PIXEL_HEIGHT[self.LOW_RESOLUTION] = self.PIXEL_HEIGHT[self.HIGH_RESOLUTION] * self.HIGH_RESOLUTION[1]/self.LOW_RESOLUTION[1]
+        else:   # ONLY ONE RESOLUTION
+            self.RESOLUTION = self.resolutions[0]
+            (self.PIXEL_WIDTH[self.RESOLUTION],
+                self.PIXEL_HEIGHT[self.RESOLUTION]) = self.calc_pixel_size(self.RESOLUTION)
+
+
 cdef class open(object):
-    """ 
+    """
     open(filename_or_path)
 
     returns GRIB file iterator object given GRIB filename or a Path object. When iterated, returns
@@ -336,7 +432,7 @@ cdef class open(object):
         if isinstance(filename, Path):
             filename = str(filename)
         bytestr = _strencode(filename)
-        self._fd = fopen(bytestr, "rb") 
+        self._fd = fopen(bytestr, "rb")
         if self._fd == NULL:
             raise IOError("could not open %s", filename)
         self._gh = NULL
@@ -353,18 +449,17 @@ cdef class open(object):
         self.messagenumber = 0
 
         self.message_index = build_message_index(self._fd)
-        print (len(self.message_index), self.message_index[:16])
         rewind(self._fd)
         kp_grib_load_entire_blob(NULL, self._fd, &err)
         if err:
             raise RuntimeError(grib_get_error_message(err))
-        rewind(self._fd)
+        # print (f'There are {len(self.message_index)} messages.')
 
     def __iter__(self):
         return self
 
     def __next__(self):
-        cdef grib_handle* gh 
+        cdef grib_handle* gh
         cdef int err
         if self.messagenumber == len(self.message_index):
             raise StopIteration
@@ -381,12 +476,12 @@ cdef class open(object):
             self._gh = gh
             self.messagenumber = self.messagenumber + 1
         return _create_gribmessage(self._gh, self.messagenumber, True)
-    
+
     def __enter__(self):
         return self
     def __exit__(self,atype,value,traceback):
         self.close()
-    
+
     def close(self):
         """
         close()
@@ -402,7 +497,7 @@ cdef class open(object):
         self._fd = NULL
 
     def __dealloc__(self):
-        # close file handle if there are no more references 
+        # close file handle if there are no more references
         # to the object.
         cdef int err
         if self._fd:
@@ -411,7 +506,7 @@ cdef class open(object):
     def message(self, N):
         """
         message(N)
-        
+
         retrieve N'th message in iterator.
         same as ``seek(N-1)`` followed by ``readline()``."""
         cdef int error
@@ -421,6 +516,9 @@ cdef class open(object):
         cdef grib_handle * gh
         if N < 1:
             raise IOError('grb message numbers start at 1')
+        if len(self.message_index) <= N-1:
+            raise IOError(f'messageNumber {N} is out of bounds. '
+                          f'There are only {len(self.message_index)} messages')
         num_sections = len(self.message_index[N-1])
         if num_sections != 8:
             raise RuntimeError('There must be exactly 8 sections within a grib2 message')
@@ -437,6 +535,163 @@ cdef class open(object):
     def seek(self, N, from_what=0):
         pass
 
+    def sort_into_bins(self,
+                       datakind_id: int,
+                       parameter_category: int,
+                       parameter_number: int,
+                       levels: List[int],
+                       step_unit: int):
+
+        cdef int numLevels
+        cdef const int * levels_ptr
+        cdef array.array levels_array
+        if levels is None:
+            numLevels = 0
+            levels_pstr = 0;
+            levels_ptr = NULL;
+        else:
+            levels_array = array.array('i', levels)
+            num_levels = len(levels)
+            levels_ptr = levels_array.data.as_ints
+
+        cdef long val
+        cdef int i = 0
+        cdef long forecast_time_step
+        cdef long srcStepUnit
+        indices_bin = {}
+        params_bin = {}  # Params per forecast_time_step
+        cdef long Ni, Nj
+        cdef double latitudeOfFirstGridPointInDegrees
+        cdef double latitudeOfLastGridPointInDegrees
+        cdef double longitudeOfFirstGridPointInDegrees
+        cdef double longitudeOfLastGridPointInDegrees
+        cdef double iDirectionIncrementInDegrees
+        cdef double jDirectionIncrementInDegrees
+        cdef long msgNum = 0
+        cdef int ouch_a = 0
+        cdef int ouch_b = 0
+        cdef int ouch_c = 0
+        cdef int ouch_d = 0
+        while 1:
+            gh = grib_handle_new_from_file(NULL, self._fd, &err)
+            msgNum += 1
+            if gh == NULL:
+                break
+            grib_get_long(gh, "backgroundProcess", &val)
+            if val != datakind_id:
+                if ouch_a == 0:
+                    print ('Ouch A!', val)
+                ouch_a += 1
+                err = grib_handle_delete(gh)
+                continue
+            grib_get_long(gh, "parameterCategory", &val)
+            if val != parameter_category:
+                if ouch_b == 0:
+                    print ('Ouch B!', val)
+                ouch_b += 1
+                err = grib_handle_delete(gh)
+                continue
+            grib_get_long(gh, "parameterNumber", &val)
+            if val != parameter_number:
+                # Ouch_C is expected.
+                ouch_c += 1
+                err = grib_handle_delete(gh)
+                continue
+            if levels_ptr != NULL:
+                grib_get_long(gh, "level", &val)
+                while i < numLevels:
+                    if val == levels_ptr[i]:
+                        break
+                    i = i + 1
+                if numLevels <= i:
+                    if ouch_d == 0:
+                        print ('Ouch D!', levels, val)
+                    couch_d += 1
+                    err = grib_handle_delete(gh)
+                    continue
+
+            if datakind_id == 151:  # Pri60lv
+                # Since forecast_time_step value can not be retrieved when Pri60lv.
+                # I think updating eccodes should help.
+                grib_get_long(gh, "forecastTime", &val)
+                forecast_time_step = val + 5
+            else:
+                grib_get_long(gh, "stepUnits", &srcStepUnit)
+                grib_get_long(gh, "step", &forecast_time_step);
+                if step_unit != srcStepUnit:
+                    pass
+                    forecast_time_step = _convert_step_time_unit(
+                        forecast_time_step, srcStepUnit, step_unit)
+
+            indices_bin.setdefault(forecast_time_step, []).append(msgNum)
+
+            params_per_fct = params_bin.setdefault(
+                forecast_time_step, Params())
+
+            grib_get_long(gh, "Ni", &Ni)
+            grib_get_long(gh, "Nj", &Nj)
+            grib_get_double(gh, "latitudeOfFirstGridPointInDegrees",
+                            &latitudeOfFirstGridPointInDegrees)
+
+            grib_get_double(gh, "latitudeOfFirstGridPointInDegrees",
+                            &latitudeOfFirstGridPointInDegrees)
+            grib_get_double(gh, "latitudeOfLastGridPointInDegrees",
+                            &latitudeOfLastGridPointInDegrees)
+            grib_get_double(gh, "longitudeOfFirstGridPointInDegrees",
+                            &longitudeOfFirstGridPointInDegrees)
+            grib_get_double(gh, "longitudeOfLastGridPointInDegrees",
+                            &longitudeOfLastGridPointInDegrees)
+            grib_get_double(gh, "iDirectionIncrementInDegrees",
+                            &iDirectionIncrementInDegrees)
+            grib_get_double(gh, "jDirectionIncrementInDegrees",
+                            &jDirectionIncrementInDegrees)
+            #print (msgNum, forecast_time_step, Ni, Nj,
+            #       latitudeOfFirstGridPointInDegrees,
+            #       longitudeOfFirstGridPointInDegrees)
+            params_per_fct.update(Ni, Nj,
+                                  latitudeOfFirstGridPointInDegrees,
+                                  latitudeOfLastGridPointInDegrees,
+                                  longitudeOfFirstGridPointInDegrees,
+                                  longitudeOfLastGridPointInDegrees,
+                                  iDirectionIncrementInDegrees,
+                                  jDirectionIncrementInDegrees)
+            err = grib_handle_delete(gh)
+
+        sorted_bins = []
+        for fct, params in params_bin.items():
+            params.finalize()
+            sorted_bins.append((fct, params, indices_bin[fct]))
+
+        return sorted_bins
+
+        # indices_bin = {}
+        # params_bin = {}  # Params per forecast_time_step
+        # for N in range(1, len(self.message_index) + 1):
+        #     msg = self.message(N)
+
+        #     if msg.backgroundProcess  != datakind_id or \
+        #         msg.parameterCategory != parameter_category or \
+        #         msg.parameterNumber   != parameter_number or \
+        #         (levels is not None and msg.level not in levels):
+        #         continue
+        #     if datakind_id == 151:  # Pri60lv
+        #         # Since forecast_time_step value can not be retrieved when Pri60lv.
+        #         # I think updating eccodes should help.
+        #         forecast_time_step = msg.forecastTime + 5
+        #     else:
+        #         forecast_time_step = msg.step if step_unit == msg.stepUnits \
+        #           else convert_step_time_units(msg.step, msg.stepUnits, step_unit)
+        #     indices_bin.setdefault(forecast_time_step, []).append(N)
+        #     params_per_fct = params_bin.setdefault(
+        #         forecast_time_step, ParamsClass())
+        #     params_per_fct.update(msg)
+
+        # sorted_bins = []
+        # for fct, params in params_bin.items():
+        #     params.finalize()
+        #     sorted_bins.append((fct, params, indices_bin[fct]))
+        # return sorted_bins
+
 
 # keep track of python gribmessage attributes so they can be
 # distinguished from grib keys.
@@ -446,7 +701,7 @@ _private_atts =\
 def julian_to_datetime(object jd):
     """
     julian_to_datetime(julday)
-    
+
     convert Julian day number to python datetime instance.
 
     Used to create ``validDate`` and ``analDate`` attributes from
@@ -463,7 +718,7 @@ def julian_to_datetime(object jd):
 def datetime_to_julian(object d):
     """
     datetime_to_julian(date)
-    
+
     convert python datetime instance to Julian day number."""
     cdef double julday
     cdef int err
@@ -513,7 +768,7 @@ def fromstring(gribstring):
 def setdates(gribmessage grb):
     """
     setdates(grb)
-    
+
     set ``fcstimeunits``, ``analDate`` and ``validDate`` attributes using
     the ``julianDay``, ``forecastTime`` and ``indicatorOfUnitOfTimeRange`` keys.
     Called automatically when :py:class:`gribmessage` instance created,
@@ -612,7 +867,7 @@ cdef class gribmessage(object):
 
     :ivar messagenumber: The grib message number in the file.
 
-    :ivar projparams: A dictionary containing proj4 key/value pairs describing 
+    :ivar projparams: A dictionary containing proj4 key/value pairs describing
       the grid.  Set to ``None`` for unsupported grid types.
 
     :ivar expand_reduced:  If True (default), reduced lat/lon and gaussian grids
@@ -995,7 +1250,7 @@ cdef class gribmessage(object):
     def __getitem__(self, key):
         """
         access values associated with grib keys.
-        
+
         The key ``values`` will return the data associated with the grib message.
         The data is returned as a numpy array, or if missing values or a bitmap
         are present, a numpy masked array.  Reduced lat/lon or gaussian grid
@@ -1209,7 +1464,7 @@ cdef class gribmessage(object):
 
     def _set_projparams(self):
         """
-        sets the ``projparams`` instance variable to a dictionary containing 
+        sets the ``projparams`` instance variable to a dictionary containing
         proj4 key/value pairs describing the grid.
         """
         projparams = {}
@@ -1390,7 +1645,7 @@ cdef class gribmessage(object):
             lats = self['distinctLatitudes']
             if lat2 < lat1 and lats[-1] > lats[0]: lats = lats[::-1]
             lons = self['distinctLongitudes']
-            lons,lats = np.meshgrid(lons,lats) 
+            lons,lats = np.meshgrid(lons,lats)
         elif self['gridType'] == 'reduced_gg': # reduced global gaussian grid
             if self.expand_reduced:
                 lat1 = self['latitudeOfFirstGridPointInDegrees']
@@ -1402,7 +1657,7 @@ cdef class gribmessage(object):
                 lon1 = self['longitudeOfFirstGridPointInDegrees']
                 lon2 = self['longitudeOfLastGridPointInDegrees']
                 lons = np.linspace(lon1,lon2,nx)
-                lons,lats = np.meshgrid(lons,lats) 
+                lons,lats = np.meshgrid(lons,lats)
             else:
                 lats = self['latitudes']
                 lons = self['longitudes']
@@ -1416,7 +1671,7 @@ cdef class gribmessage(object):
                 lon2 = self['longitudeOfLastGridPointInDegrees']
                 lons = np.linspace(lon1,lon2,nx)
                 lats = np.linspace(lat1,lat2,ny)
-                lons,lats = np.meshgrid(lons,lats) 
+                lons,lats = np.meshgrid(lons,lats)
             else:
                 lats = self['latitudes']
                 lons = self['longitudes']
@@ -1656,7 +1911,7 @@ class EndOfFile(Exception):
 cdef skip_section(FILE *fp):
     cdef long curr_pos
     cdef char buf[4]
-    
+
     curr_pos = ftell(fp)
     fread(buf, 1, 4, fp)
     if strncmp(buf, b'7777', 4) == 0:
