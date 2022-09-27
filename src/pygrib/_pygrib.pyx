@@ -601,7 +601,7 @@ cdef class open(object):
                 grib_get_long(gh, "level", &val)
                 level_index = 0
                 while level_index < numLevels:
-                    if val == levels_ptr[i]:
+                    if val == levels_ptr[level_index]:
                         break
                     level_index += 1
                 if numLevels <= i:
