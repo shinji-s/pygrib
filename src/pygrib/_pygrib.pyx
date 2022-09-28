@@ -579,20 +579,24 @@ cdef class open(object):
             grib_get_long(gh, "backgroundProcess", &val)
             if val != datakind_id:
                 if ouch_a == 0:
-                    print ('Trace: Ouch A!', val)
+                    print (f'Trace: datakind_id: {datakind_id} is sought. '
+                           f'Ignoring {val}.')
                 ouch_a += 1
                 err = grib_handle_delete(gh)
                 continue
             grib_get_long(gh, "parameterCategory", &val)
             if val != parameter_category:
                 if ouch_b == 0:
-                    print ('Trace: Ouch B!', val)
+                    print (f'Trace: parameter_category: {parameter_category} '
+                           f'is sought. Ignoring {val}.')
                 ouch_b += 1
                 err = grib_handle_delete(gh)
                 continue
             grib_get_long(gh, "parameterNumber", &val)
             if val != parameter_number:
-                # Ouch_C is expected.
+                if ouch_c == 0:
+                    print (f'Trace: parameter_number: {parameter_number} '
+                           f'is sought. Ignoring {val}.')
                 ouch_c += 1
                 err = grib_handle_delete(gh)
                 continue
@@ -605,7 +609,8 @@ cdef class open(object):
                     level_index += 1
                 if numLevels <= level_index:
                     if ouch_d == 0:
-                        print ('Trace: Ouch D!', levels, val, level_index, levels_ptr[0], numLevels)
+                        print (f'Trace: levels: {levels} is sought. '
+                               f'Ignoring {val}.')
                     ouch_d += 1
                     err = grib_handle_delete(gh)
                     continue
@@ -630,9 +635,6 @@ cdef class open(object):
 
             grib_get_long(gh, "Ni", &Ni)
             grib_get_long(gh, "Nj", &Nj)
-            grib_get_double(gh, "latitudeOfFirstGridPointInDegrees",
-                            &latitudeOfFirstGridPointInDegrees)
-
             grib_get_double(gh, "latitudeOfFirstGridPointInDegrees",
                             &latitudeOfFirstGridPointInDegrees)
             grib_get_double(gh, "latitudeOfLastGridPointInDegrees",
