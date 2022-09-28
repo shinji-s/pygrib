@@ -462,6 +462,9 @@ cdef class open(object):
         cdef grib_handle* gh
         cdef int err
         if self.messagenumber == len(self.message_index):
+            # Prepare for the next call to this function.
+            self.messagenumber = 0
+            rewind(self._fd)
             raise StopIteration
         if self._gh is not NULL:
             err = grib_handle_delete(self._gh)
@@ -471,6 +474,9 @@ cdef class open(object):
         if err:
             raise RuntimeError(grib_get_error_message(err))
         if gh == NULL:
+            # Prepare for the next call to this function.
+            self.messagenumber = 0
+            rewind(self._fd)
             raise StopIteration
         else:
             self._gh = gh
@@ -658,6 +664,9 @@ cdef class open(object):
                                   iDirectionIncrementInDegrees,
                                   jDirectionIncrementInDegrees)
             err = grib_handle_delete(gh)
+
+        if ouch_a or ouch_b or ouch_c or ouch_d:
+            print (f'Ouches: {ouch_a} {ouch_b} {ouch_c} {ouch_d}')
 
         sorted_bins = []
         for fct, params in params_bin.items():
