@@ -18,8 +18,10 @@ import pyproj
 from cpython cimport array
 import array
 
-cdef _redtoreg(object nlonsin, npc.ndarray lonsperlat, npc.ndarray redgrid, \
-              object missval):
+HRNC_DATAKIND_ID = 151
+
+cdef _redtoreg(object nlonsin, npc.ndarray lonsperlat, npc.ndarray redgrid,
+               object missval):
     """
     convert data on global reduced gaussian to global
     full gaussian grid using linear interpolation.
@@ -513,13 +515,15 @@ cdef class open(object):
     def seek(self, N, from_what=0):
         pass
 
-    def sort_into_bins(self,
-                       datakind_id: int,
-                       parameter_category: int,
-                       parameter_number: int,
-                       levels: List[int],
-                       step_unit: int):
-
+    def submit_jobs_to_workers(self,
+                               datakind_id: int,
+                               parameter_category: int,
+                               parameter_number: int,
+                               levels: List[int],
+                               step_unit: int,
+                               work_queue: object,
+                               pixel_type: object,
+                               ):
         cdef int numLevels
         cdef const int * levels_ptr
         cdef array.array levels_array
@@ -593,7 +597,7 @@ cdef class open(object):
                     err = grib_handle_delete(gh)
                     continue
 
-            if datakind_id == 151:  # Pri60lv
+            if datakind_id == HRNC_DATAKIND_ID:  # Pri60lv
                 # Since forecast_time_step value can not be retrieved when Pri60lv.
                 # I think updating eccodes should help.
                 grib_get_long(gh, "forecastTime", &val)
@@ -606,7 +610,8 @@ cdef class open(object):
                     forecast_time_step = convert_step_time_unit(
                         forecast_time_step, srcStepUnit, step_unit)
 
-            indices_bin.setdefault(forecast_time_step, []).append(msgNum)
+            indice_list = indices_bin.setdefault(forecast_time_step, [])
+            indice_list.append(msgNum)
 
             params_per_fct = params_bin.setdefault(
                 forecast_time_step, Params())
@@ -635,46 +640,34 @@ cdef class open(object):
                                   longitudeOfLastGridPointInDegrees,
                                   iDirectionIncrementInDegrees,
                                   jDirectionIncrementInDegrees)
+
+            if len(indice_list)==1773 and datakind_id == HRNC_DATAKIND_ID:
+                params_per_fct.finalize()
+                work_queue.put((datakind_id, pixel_type, step_unit,
+                                (forecast_time_step,
+                                 params_per_fct,
+                                 indice_list)))
+                indices_bin.pop(forecast_time_step)
+                params_bin.pop(forecast_time_step)
+
             err = grib_handle_delete(gh)
 
-        if ouch_a or ouch_b or ouch_c or ouch_d:
-            print (f'Ouches: {ouch_a} {ouch_b} {ouch_c} {ouch_d}')
-
         rewind(self._fd)
-        sorted_bins = []
-        for fct, params in params_bin.items():
-            params.finalize()
-            sorted_bins.append((fct, params, indices_bin[fct]))
 
-        return sorted_bins
+        if ouch_a or ouch_b or ouch_c or ouch_d:
+            print (f'Ignore counts: {ouch_a} {ouch_b} {ouch_c} {ouch_d}')
 
-        # indices_bin = {}
-        # params_bin = {}  # Params per forecast_time_step
-        # for N in range(1, len(self.message_index) + 1):
-        #     msg = self.message(N)
-
-        #     if msg.backgroundProcess  != datakind_id or \
-        #         msg.parameterCategory != parameter_category or \
-        #         msg.parameterNumber   != parameter_number or \
-        #         (levels is not None and msg.level not in levels):
-        #         continue
-        #     if datakind_id == 151:  # Pri60lv
-        #         # Since forecast_time_step value can not be retrieved when Pri60lv.
-        #         # I think updating eccodes should help.
-        #         forecast_time_step = msg.forecastTime + 5
-        #     else:
-        #         forecast_time_step = msg.step if step_unit == msg.stepUnits \
-        #           else convert_step_time_units(msg.step, msg.stepUnits, step_unit)
-        #     indices_bin.setdefault(forecast_time_step, []).append(N)
-        #     params_per_fct = params_bin.setdefault(
-        #         forecast_time_step, ParamsClass())
-        #     params_per_fct.update(msg)
-
-        # sorted_bins = []
-        # for fct, params in params_bin.items():
-        #     params.finalize()
-        #     sorted_bins.append((fct, params, indices_bin[fct]))
-        # return sorted_bins
+        if datakind_id == HRNC_DATAKIND_ID:
+            if 0 < len(indices_bin) or 0 < len(params_bin):
+                print ('Trace: Unprocessed HRNC blocks exist! '
+                       'This is unexpcted!!! '
+                       f'{len(indices_bin)},{len(params_bin)}'
+                       )
+        else:
+            for fct, params in params_bin.items():
+                params.finalize()
+                work_queue.put((datakind_id, pixel_type, step_unit,
+                                (fct, params, indices_bin[fct])))
 
 
 # keep track of python gribmessage attributes so they can be
