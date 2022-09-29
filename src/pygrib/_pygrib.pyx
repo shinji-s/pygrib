@@ -455,34 +455,6 @@ cdef class open(object):
             raise RuntimeError(grib_get_error_message(err))
         # print (f'There are {len(self.message_index)} messages.')
 
-    def __iter__(self):
-        return self
-
-    def __next__(self):
-        cdef grib_handle* gh
-        cdef int err
-        if self.messagenumber == len(self.message_index):
-            # Prepare for the next call to this function.
-            self.messagenumber = 0
-            rewind(self._fd)
-            raise StopIteration
-        if self._gh is not NULL:
-            err = grib_handle_delete(self._gh)
-            if err:
-                raise RuntimeError(grib_get_error_message(err))
-        gh = grib_handle_new_from_file(NULL, self._fd, &err)
-        if err:
-            raise RuntimeError(grib_get_error_message(err))
-        if gh == NULL:
-            # Prepare for the next call to this function.
-            self.messagenumber = 0
-            rewind(self._fd)
-            raise StopIteration
-        else:
-            self._gh = gh
-            self.messagenumber = self.messagenumber + 1
-        return _create_gribmessage(self._gh, self.messagenumber, True)
-
     def __enter__(self):
         return self
     def __exit__(self,atype,value,traceback):
@@ -668,6 +640,7 @@ cdef class open(object):
         if ouch_a or ouch_b or ouch_c or ouch_d:
             print (f'Ouches: {ouch_a} {ouch_b} {ouch_c} {ouch_d}')
 
+        rewind(self._fd)
         sorted_bins = []
         for fct, params in params_bin.items():
             params.finalize()
