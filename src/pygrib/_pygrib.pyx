@@ -18,6 +18,8 @@ import pyproj
 from cpython cimport array
 import array
 
+PPID = f'PPID:{os.getppid()}'
+
 HRNC_DATAKIND_ID = 151
 
 cdef _redtoreg(object nlonsin, npc.ndarray lonsperlat, npc.ndarray redgrid,
@@ -561,23 +563,23 @@ cdef class open(object):
             grib_get_long(gh, "backgroundProcess", &val)
             if val != datakind_id:
                 if ouch_a == 0:
-                    print (f'Trace: datakind_id: {datakind_id} is sought. '
-                           f'Ignoring {val}.')
+                    print (f'{PPID} Trace: datakind_id: {datakind_id} is '
+                           f'sought. Ignoring {val}.')
                 ouch_a += 1
                 err = grib_handle_delete(gh)
                 continue
             grib_get_long(gh, "parameterCategory", &val)
             if val != parameter_category:
                 if ouch_b == 0:
-                    print (f'Trace: parameter_category: {parameter_category} '
-                           f'is sought. Ignoring {val}.')
+                    print (f'{PPID} parameter_category: '
+                           f'{parameter_category} is sought. Ignoring {val}.')
                 ouch_b += 1
                 err = grib_handle_delete(gh)
                 continue
             grib_get_long(gh, "parameterNumber", &val)
             if val != parameter_number:
                 if ouch_c == 0:
-                    print (f'Trace: parameter_number: {parameter_number} '
+                    print (f'{PPID} parameter_number: {parameter_number} '
                            f'is sought. Ignoring {val}.')
                 ouch_c += 1
                 err = grib_handle_delete(gh)
@@ -591,7 +593,7 @@ cdef class open(object):
                     level_index += 1
                 if numLevels <= level_index:
                     if ouch_d == 0:
-                        print (f'Trace: levels: {levels} is sought. '
+                        print (f'{PPID} levels: {levels} is sought. '
                                f'Ignoring {val}.')
                     ouch_d += 1
                     err = grib_handle_delete(gh)
@@ -655,11 +657,11 @@ cdef class open(object):
         rewind(self._fd)
 
         if ouch_a or ouch_b or ouch_c or ouch_d:
-            print (f'Ignore counts: {ouch_a} {ouch_b} {ouch_c} {ouch_d}')
+            print (f'{PPID} Ignores: {ouch_a} {ouch_b} {ouch_c} {ouch_d}')
 
         if datakind_id == HRNC_DATAKIND_ID:
             if 0 < len(indices_bin) or 0 < len(params_bin):
-                print ('Trace: Unprocessed HRNC blocks exist! '
+                print (f'{PPID} Trace: Unprocessed HRNC blocks exist! '
                        'This is unexpcted!!! '
                        f'{len(indices_bin)},{len(params_bin)}'
                        )
