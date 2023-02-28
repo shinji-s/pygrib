@@ -1,5 +1,5 @@
 #cython: language_level=3
-index"""pygrib module"""
+"""pygrib module"""
 
 __version__ = '2.1.4'
 
