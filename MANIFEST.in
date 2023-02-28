@@ -7,8 +7,8 @@ include utils/*grib*
 include Changelog
 recursive-include src *pyx
 recursive-include src *py
+recursive-include src *.def
 recursive-include docs *
-recursive-include eccodes *.def
 recursive-include test *.py
 include sampledata/*.grb
 include sampledata/*.grb2
