@@ -522,7 +522,7 @@ cdef class open(object):
                                datakind_id: int,
                                parameter_category: int,
                                parameter_number: int,
-                               levels: List[int],
+                               levels: List[int] | None,
                                step_unit: int,
                                work_queue: object,
                                pixel_type: object,
