@@ -1618,7 +1618,6 @@ cdef class gribmessage(object):
             return datarr
         if ny != GRIB_MISSING_LONG and nx != GRIB_MISSING_LONG and\
            self.expand_reduced:
-            print (datarr.shape)
             if self.has_key('jPointsAreConsecutive') and\
                 self['jPointsAreConsecutive']:
                 storageorder='F'
