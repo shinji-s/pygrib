@@ -2324,9 +2324,10 @@ cdef skip_section(FILE *fp):
       ((buf[1]<<16) & 0xff0000) + \
       ((buf[2]<<8)&0xff00) + (buf[3]&0xff)
     section_number = fgetc(fp)
+    sixth_byte = (fgetc(fp) & 0xff)
     # print (f'section{section_number}', section_length)
     fseek(fp, curr_pos + section_length, SEEK_SET)
-    return section_number, curr_pos, section_length
+    return section_number, curr_pos, section_length, sixth_byte
 
 cdef build_message_index(FILE *fp):
     cdef char buf[16];
@@ -2337,8 +2338,13 @@ cdef build_message_index(FILE *fp):
     prev_sections = [(0, 16)] + [None] * 7
     while True:
         try:
-            section_number, section_offset, section_length = skip_section(fp)
-            prev_sections[section_number] = (section_offset, section_length)
+            section_number, section_offset, section_length, sixth_byte = skip_section(fp)
+            if section_number == 6 and sixth_byte == 254:
+                # Handle inherited bitmap
+                pass
+            else:
+                prev_sections[section_number] = (section_offset,
+                                                 section_length)
             if section_number == 7:
                index.append(prev_sections[:])
         except EndOfFile:
