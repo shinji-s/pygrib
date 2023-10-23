@@ -1,20 +1,18 @@
-#cython: language_level=3
 """pygrib module"""
 
 __version__ = '2.1.4'
 
-from datetime import datetime
+import numpy as np
+cimport numpy as npc
+import warnings
 import os
+from datetime import datetime
+from io import BufferedReader
 from pathlib import Path
 from pkg_resources import parse_version
 from typing import List
-import warnings
-
-import numpy as np
-cimport numpy as npc
 from numpy import ma
 import pyproj
-
 #import_array()
 from cpython cimport array
 import array
@@ -23,8 +21,8 @@ PPID = f'PPID:{os.getppid()}'
 
 HRNC_DATAKIND_ID = 151
 
-cdef _redtoreg(object nlonsin, npc.ndarray lonsperlat, npc.ndarray redgrid,
-               object missval):
+cdef _redtoreg(object nlonsin, npc.ndarray lonsperlat, npc.ndarray redgrid, \
+              object missval):
     """
     convert data on global reduced gaussian to global
     full gaussian grid using linear interpolation.
@@ -55,7 +53,7 @@ cdef _redtoreg(object nlonsin, npc.ndarray lonsperlat, npc.ndarray redgrid,
         flons = <double>ilons
         for i from 0 <= i < nlons:
             # zxi is the grid index (relative to the reduced grid)
-            # of the i'th point on the full grid.
+            # of the i'th point on the full grid. 
             zxi = i * flons / nlons # goes from 0 to ilons
             im = <long>zxi
             zdx = zxi - <double>im
@@ -65,7 +63,7 @@ cdef _redtoreg(object nlonsin, npc.ndarray lonsperlat, npc.ndarray redgrid,
                 # if one of the nearest values is missing, use nearest
                 # neighbor interpolation.
                 if redgrdptr[indx+im] == missvl or\
-                   redgrdptr[indx+ip] == missvl:
+                   redgrdptr[indx+ip] == missvl: 
                     if zdx < 0.5:
                         reggrdptr[n] = redgrdptr[indx+im]
                     else:
@@ -84,18 +82,21 @@ cdef extern from "stdlib.h":
 
 cdef extern from "stdio.h":
     ctypedef struct FILE
-    enum: SEEK_SET
     FILE *fopen(char *path, char *mode)
-    int fclose(FILE *)
-    int fgetc(FILE *stream)
+    FILE *fdopen(int, char *mode)
+    int	fclose(FILE *)
     size_t fread(void *ptr, size_t size, size_t nmemb, FILE *stream)
     size_t fwrite(void *ptr, size_t size, size_t nitems, FILE *stream)
-    long ftell(FILE * f)
-    int fseek(FILE *stream, long offset, int whence)
-    void rewind (FILE *)
+    int fseek(FILE *, long, int)
+    long ftell(FILE *)
+    int SEEK_SET
+    int fgetc(FILE *stream);
 
 cdef extern from "string.h":
     int strncmp(const char *s1, const char *s2, size_t n);
+
+cdef extern from "./portable.h":
+    int wrap_dup(int)
 
 cdef extern from "Python.h":
     object PyBytes_FromStringAndSize(char *s, size_t size)
@@ -125,19 +126,19 @@ cdef extern from "grib_api.h":
         GRIB_TYPE_LONG
         GRIB_TYPE_DOUBLE
         GRIB_TYPE_STRING
-        GRIB_TYPE_BYTES
-        GRIB_TYPE_SECTION
-        GRIB_TYPE_LABEL
-        GRIB_TYPE_MISSING
-        GRIB_KEYS_ITERATOR_ALL_KEYS
-        GRIB_KEYS_ITERATOR_SKIP_READ_ONLY
-        GRIB_KEYS_ITERATOR_SKIP_OPTIONAL
-        GRIB_KEYS_ITERATOR_SKIP_EDITION_SPECIFIC
-        GRIB_KEYS_ITERATOR_SKIP_CODED
-        GRIB_KEYS_ITERATOR_SKIP_COMPUTED
-        GRIB_KEYS_ITERATOR_SKIP_FUNCTION
-        GRIB_KEYS_ITERATOR_SKIP_DUPLICATES
-        GRIB_MISSING_LONG
+        GRIB_TYPE_BYTES 
+        GRIB_TYPE_SECTION 
+        GRIB_TYPE_LABEL 
+        GRIB_TYPE_MISSING 
+        GRIB_KEYS_ITERATOR_ALL_KEYS            
+        GRIB_KEYS_ITERATOR_SKIP_READ_ONLY         
+        GRIB_KEYS_ITERATOR_SKIP_OPTIONAL          
+        GRIB_KEYS_ITERATOR_SKIP_EDITION_SPECIFIC  
+        GRIB_KEYS_ITERATOR_SKIP_CODED             
+        GRIB_KEYS_ITERATOR_SKIP_COMPUTED         
+        GRIB_KEYS_ITERATOR_SKIP_FUNCTION         
+        GRIB_KEYS_ITERATOR_SKIP_DUPLICATES       
+        GRIB_MISSING_LONG 
         GRIB_MISSING_DOUBLE
     int grib_get_size(grib_handle *h, char *name, size_t *size)
     int grib_get_native_type(grib_handle *h, char *name, int *type)
@@ -156,12 +157,11 @@ cdef extern from "grib_api.h":
     char* grib_keys_iterator_get_name(grib_keys_iterator *kiter)
     int grib_handle_delete(grib_handle* h)
     grib_handle* grib_handle_new_from_file(grib_context* c, FILE* f, int* error)        
-    grib_handle* grib_new_from_file(grib_context * c, FILE* f, int headers_only, int *error)
     char* grib_get_error_message(int code)
     int grib_keys_iterator_delete( grib_keys_iterator* kiter)
     void grib_multi_support_on(grib_context* c)
     void grib_multi_support_off(grib_context* c)
-    int grib_get_message(grib_handle* h , void ** message, size_t *message_length)
+    int grib_get_message(grib_handle* h ,  void** message,size_t *message_length)
     int grib_get_message_copy(grib_handle* h ,  void* message,size_t *message_length)
     long grib_get_api_version()
     grib_handle* grib_handle_clone(grib_handle* h)
@@ -285,7 +285,7 @@ def set_definitions_path(object eccodes_definition_path):
 if 'ECCODES_DEFINITION_PATH' in os.environ:
     _eccodes_datadir = os.environ['ECCODES_DEFINITION_PATH']
 else:
-    # definitions at level of package dir
+    # definitions at level of package dir 
     _tmp_path = os.path.join('share','eccodes','definitions')
     _definitions_path = os.path.join(os.path.dirname(__file__),_tmp_path)
     # if definitions path exists inside pygrib installation (as it does when installed
@@ -401,11 +401,14 @@ class Params(object):
                 self.PIXEL_HEIGHT[self.RESOLUTION]) = self.calc_pixel_size(self.RESOLUTION)
 
 
-cdef class open(object):
-    """
-    open(filename_or_path)
 
-    returns GRIB file iterator object given GRIB filename or a Path object. When iterated, returns
+cdef class open(object):
+    """ 
+    open(filepath_or_buffer)
+
+    returns GRIB file iterator object given GRIB file path (:py:class:`str` or
+    :py:class:`pathlib.Path` object) or buffer (:py:class:`io.BufferedReader` object).
+    When iterated, returns
     instances of the :py:class:`gribmessage` class. Behaves much like a python file
     object, with :py:meth:`seek`, :py:meth:`tell`, :py:meth:`read`
     :py:meth:`readline` and :py:meth:`close` methods
@@ -426,7 +429,9 @@ cdef class open(object):
     :ivar name: The GRIB file which the instance represents."""
     cdef FILE *_fd
     cdef grib_handle *_gh
-    cdef public object name, messagenumber, closed,\
+    cdef long _offset
+    cdef object _inner
+    cdef public object name, messagenumber, messages, closed,\
                        has_multi_field_msgs
     cdef list message_index
 
@@ -434,19 +439,34 @@ cdef class open(object):
         # initialize C level objects.
         cdef grib_handle *gh
         cdef FILE *_fd
-        if isinstance(filename, Path):
-            filename = str(filename)
-        bytestr = _strencode(filename)
-        self._fd = fopen(bytestr, "rb")
+        if isinstance(filename, BufferedReader):
+            fileno = wrap_dup(filename.fileno())
+            self._fd = fdopen(fileno, "rb")
+            self._offset = filename.tell()
+            self._inner = filename
+            # since BufferedReader has its own read buffer,
+            # BufferedReader.seek() sometimes just changes its
+            # internal position and BufferedReader.tell() returns
+            # a calculated value, we need to ensure the actual
+            # position by fseek().
+            fseek(self._fd, self._offset, SEEK_SET)
+        else:
+            if isinstance(filename, Path):
+                filename = str(filename)
+            bytestr = _strencode(filename)
+            self._fd = fopen(bytestr, "rb")
+            self._offset = 0
+            self._inner = None
         if self._fd == NULL:
             raise IOError("could not open %s", filename)
         self._gh = NULL
-
     def __init__(self, filename):
         cdef int err, ncount
         cdef grib_handle *gh
         # initalize Python level objects
-        if isinstance(filename, Path):
+        if isinstance(filename, BufferedReader):
+            self.name = filename.name
+        elif isinstance(filename, Path):
             self.name = str(filename)
         else:
             self.name = filename
@@ -454,54 +474,185 @@ cdef class open(object):
         self.messagenumber = 0
 
         self.message_index = build_message_index(self._fd)
-        rewind(self._fd)
+        assert self._offset == 0
+        fseek(self._fd, 0, SEEK_SET)
         kp_grib_load_entire_blob(NULL, self._fd, &err)
-        if err:
-            raise RuntimeError(grib_get_error_message(err))
-        # print (f'There are {len(self.message_index)} messages.')
+        assert(self._offset == 0);
+        fseek(self._fd, self._offset, SEEK_SET)
+        self.messages = len(self.message_index)
+        self.has_multi_field_msgs = 0 < self.messages
 
+        # # count number of messages in file.
+        # nmsgs = 0
+        # while 1:
+        #     gh = grib_handle_new_from_file(NULL, self._fd, &err)
+        #     err = grib_handle_delete(gh)
+        #     if gh == NULL: break
+        #     nmsgs = nmsgs + 1
+        # fseek(self._fd, self._offset, SEEK_SET)
+        # self.messages = nmsgs 
+        # err =  grib_count_in_file(NULL, self._fd, &ncount)
+        # # if number of messages returned by grib_count_in_file
+        # # differs from brute-force method of counting, then
+        # # there must be multi-field messages in the file.
+        # if ncount != self.messages:
+        #     self.has_multi_field_msgs=True
+        # else:
+        #     self.has_multi_field_msgs=False
+        # fseek(self._fd, self._offset, SEEK_SET)
+    def __iter__(self):
+        return self
+    def __next__(self):
+        cdef grib_handle* gh 
+        cdef int err
+        if self.messagenumber == self.messages:
+            raise StopIteration
+        if self._gh is not NULL:
+            err = grib_handle_delete(self._gh)
+            if err:
+                raise RuntimeError(_get_error_message(err))
+        gh = grib_handle_new_from_file(NULL, self._fd, &err)
+        if err:
+            raise RuntimeError(_get_error_message(err))
+        if gh == NULL:
+            raise StopIteration
+        else:
+            self._gh = gh
+            self.messagenumber = self.messagenumber + 1
+        return _create_gribmessage(self._gh, self.messagenumber, True)
+    def __getitem__(self, key):
+        if type(key) == slice:
+            # for a slice, return a list of grib messages.
+            beg, end, inc = key.indices(self.messages)
+            msg = self.tell()
+            grbs = [self.message(n) for n in xrange(beg,end,inc)]
+            self.seek(msg) # put iterator back in original position
+            return grbs
+        elif type(key) == int or type(key) == long:
+            # for an integer, return a single grib message.
+            msg = self.tell()
+            grb = self.message(key)
+            self.seek(msg) # put iterator back in original position
+            return grb
+        else:
+            raise KeyError('key must be an integer message number or a slice')
+    def __call__(self, **kwargs):
+        """same as :py:meth:`select`"""
+        return self.select(**kwargs)
     def __enter__(self):
         return self
     def __exit__(self,atype,value,traceback):
         self.close()
+    def tell(self):
+        """returns position of iterator (grib message number, 0 means iterator
+        is positioned at beginning of file)."""
+        return self.messagenumber
+    def seek(self, msg, from_what=0):
+        """
+        seek(N,from_what=0)
+        
+        advance iterator N grib messages from beginning of file 
+        (if ``from_what=0``), from current position (if ``from_what=1``)
+        or from the end of file (if ``from_what=2``)."""
+        if from_what not in [0,1,2]:
+            raise ValueError('from_what keyword arg to seek must be 0,1 or 2')
+        if msg == 0:
+            if from_what == 0:
+                self.rewind()
+            elif from_what == 1:
+                return
+            elif from_what == 2:
+                self.message(self.messages)
+        else:
+            if from_what == 0:
+                self.message(msg)
+            elif from_what == 1:
+                self.message(self.messagenumber+msg)
+            elif from_what == 2:
+                self.message(self.messages+msg)
+    def readline(self):
+        """
+        readline()
 
+        read one entire grib message from the file.
+        Returns a :py:class:`gribmessage` instance, or ``None`` if an ``EOF`` is encountered."""
+        try:
+            if hasattr(self,'next'):
+                grb = self.next()
+            else:
+                grb = next(self)
+        except StopIteration:
+            grb = None
+        return grb
+    def read(self,msgs=None):
+        """
+        read(N=None)
+        
+        read N messages from current position, returning grib messages instances in a
+        list.  If N=None, all the messages to the end of the file are read.
+        ``pygrib.open(f).read()`` is equivalent to ``list(pygrib.open(f))``,
+        both return a list containing :py:class:`gribmessage` instances for all the
+        grib messages in the file ``f``.
+        """
+        if msgs is None:
+            grbs = self._advance(self.messages-self.messagenumber,return_msgs=True)
+        else:
+            grbs = self._advance(msgs,return_msgs=True)
+        return grbs
     def close(self):
         """
         close()
 
         close GRIB file, deallocate C structures associated with class instance"""
         cdef int err
+        if self._inner is not None:
+            self._inner.seek(ftell(self._fd))
+            self._inner = None
         fclose(self._fd)
         if self._gh != NULL:
             err = grib_handle_delete(self._gh)
             if err:
-                raise RuntimeError(grib_get_error_message(err))
+                raise RuntimeError(_get_error_message(err))
         self.closed = True
         self._fd = NULL
 
     def __dealloc__(self):
-        # close file handle if there are no more references
+        # close file handle if there are no more references 
         # to the object.
         cdef int err
         if self._fd:
             fclose(self._fd)
 
+    def rewind(self):
+        """rewind iterator (same as ``seek(0)``)"""
+        # before rewinding, move iterator to end of file
+        # to make sure it is not left in a funky state
+        # (such as in the middle of a multi-part message, issue 54)
+        while 1:
+            gh = grib_handle_new_from_file(NULL, self._fd, &err)
+            err = grib_handle_delete(gh)
+            if gh == NULL: break
+        fseek(self._fd, self._offset, SEEK_SET)
+        self.messagenumber = 0
+
     def message(self, N):
         """
         message(N)
-
+        
         retrieve N'th message in iterator.
         same as ``seek(N-1)`` followed by ``readline()``."""
+
         cdef int error
         cdef int num_sections
         cdef long offsets[8]
         cdef size_t lengths[8]
         cdef grib_handle * gh
+
         if N < 1:
             raise IOError('grb message numbers start at 1')
-        if len(self.message_index) <= N-1:
+        if self.messages <= N -1:
             raise IOError(f'messageNumber {N} is out of bounds. '
-                          f'There are only {len(self.message_index)} messages')
+                          f'There are only {self.messages} messages')
         num_sections = len(self.message_index[N-1])
         if num_sections != 8:
             raise RuntimeError('There must be exactly 8 sections within a grib2 message')
@@ -515,8 +666,68 @@ cdef class open(object):
         gh = kp_grib2_handle_new_from_sections(NULL, self._fd, offsets, lengths, &error)
         return _create_gribmessage(gh, self.messagenumber, False)
 
-    def seek(self, N, from_what=0):
-        pass
+    def select(self, **kwargs):
+        """
+select(**kwargs)
+
+return a list of :py:class:`gribmessage` instances from iterator filtered by ``kwargs``.
+If keyword is a container object, each grib message
+in the iterator is searched for membership in the container.
+If keyword is a callable (has a ``_call__`` method), each grib
+message in the iterator is tested using the callable (which should
+return a boolean).
+If keyword is not a container object or a callable, each 
+grib message in the iterator is tested for equality.
+
+Example usage:
+
+>>> import pygrib
+>>> grbs = pygrib.open('sampledata/gfs.grb')
+>>> selected_grbs=grbs.select(shortName='gh',typeOfLevel='isobaricInhPa',level=10)
+>>> for grb in selected_grbs: grb
+26:Geopotential height:gpm (instant):regular_ll:isobaricInhPa:level 10 Pa:fcst time 72 hrs:from 200412091200:lo res cntl fcst
+>>> # the __call__ method does the same thing
+>>> selected_grbs=grbs(shortName='gh',typeOfLevel='isobaricInhPa',level=10)
+>>> for grb in selected_grbs: grb
+26:Geopotential height:gpm (instant):regular_ll:isobaricInhPa:level 10 Pa:fcst time 72 hrs:from 200412091200:lo res cntl fcst
+>>> # to select multiple specific key values, use containers (e.g. sequences)
+>>> selected_grbs=grbs(shortName=['u','v'],typeOfLevel='isobaricInhPa',level=[10,50])
+>>> for grb in selected_grbs: grb
+193:u-component of wind:m s**-1 (instant):regular_ll:isobaricInhPa:level 50 Pa:fcst time 72 hrs:from 200412091200:lo res cntl fcst
+194:v-component of wind:m s**-1 (instant):regular_ll:isobaricInhPa:level 50 Pa:fcst time 72 hrs:from 200412091200:lo res cntl fcst
+199:u-component of wind:m s**-1 (instant):regular_ll:isobaricInhPa:level 10 Pa:fcst time 72 hrs:from 200412091200:lo res cntl fcst
+200:v-component of wind:m s**-1 (instant):regular_ll:isobaricInhPa:level 10 Pa:fcst time 72 hrs:from 200412091200:lo res cntl fcst
+>>> # to select key values based on a conditional expression, use a function
+>>> selected_grbs=grbs(shortName='gh',level=lambda l: l < 500 and l >= 300)
+>>> for grb in selected_grbs: grb
+14:Geopotential height:gpm (instant):regular_ll:isobaricInhPa:level 45000 Pa:fcst time 72 hrs:from 200412091200:lo res cntl fcst
+15:Geopotential height:gpm (instant):regular_ll:isobaricInhPa:level 40000 Pa:fcst time 72 hrs:from 200412091200:lo res cntl fcst
+16:Geopotential height:gpm (instant):regular_ll:isobaricInhPa:level 35000 Pa:fcst time 72 hrs:from 200412091200:lo res cntl fcst
+17:Geopotential height:gpm (instant):regular_ll:isobaricInhPa:level 30000 Pa:fcst time 72 hrs:from 200412091200:lo res cntl fcst
+"""
+        msgnum = self.tell()
+        self.rewind() # always search from beginning
+        grbs = [grb for grb in self if _find(grb, **kwargs)]
+        self.seek(msgnum) # leave iterator in original position.
+        if not grbs:
+            raise ValueError('no matches found')
+        return grbs
+    def _advance(self,nmsgs,return_msgs=False):
+        """advance iterator n messages from current position.
+        if ``return_msgs==True``, grib message instances are returned
+        in a list"""
+        cdef int err
+        cdef int saved_messagenumber
+        if nmsgs < 0: 
+            raise ValueError('nmsgs must be >= 0 in _advance')
+        saved_messagenumber = self.messagenumber
+        self.messagenumber += nmsgs
+        if self.messages < self.messagenumber:
+            raise IOError('not that many messages in file')
+        if not return_msgs:
+            return None
+        return [self.message(n+1) for n
+                in range(saved_messagenumber, self.messagenumber)]
 
     def submit_jobs_to_workers(self,
                                datakind_id: int,
@@ -655,7 +866,7 @@ cdef class open(object):
 
             err = grib_handle_delete(gh)
 
-        rewind(self._fd)
+        self.rewind()
 
         if ouch_a or ouch_b or ouch_c or ouch_d:
             print (f'{PPID} Ignores: {ouch_a} {ouch_b} {ouch_c} {ouch_d}')
@@ -681,7 +892,7 @@ _private_atts =\
 def julian_to_datetime(object jd):
     """
     julian_to_datetime(julday)
-
+    
     convert Julian day number to python datetime instance.
 
     Used to create ``validDate`` and ``analDate`` attributes from
@@ -692,13 +903,13 @@ def julian_to_datetime(object jd):
     julday = jd
     err = grib_julian_to_datetime(julday, &year, &month, &day, &hour, &minute, &second)
     if err:
-        raise RuntimeError(grib_get_error_message(err))
+        raise RuntimeError(_get_error_message(err))
     return datetime(year, month, day, hour, minute, second)
 
 def datetime_to_julian(object d):
     """
     datetime_to_julian(date)
-
+    
     convert python datetime instance to Julian day number."""
     cdef double julday
     cdef int err
@@ -707,7 +918,7 @@ def datetime_to_julian(object d):
     minute = d.minute; second = d.second
     err = grib_datetime_to_julian(year,month,day,hour,minute,second,&julday)
     if err:
-        raise RuntimeError(grib_get_error_message(err))
+        raise RuntimeError(_get_error_message(err))
     return julday
 
 cdef _create_gribmessage(grib_handle *gh, object messagenumber, dup_handle):
@@ -748,7 +959,7 @@ def fromstring(gribstring):
 def setdates(gribmessage grb):
     """
     setdates(grb)
-
+    
     set ``fcstimeunits``, ``analDate`` and ``validDate`` attributes using
     the ``julianDay``, ``forecastTime`` and ``indicatorOfUnitOfTimeRange`` keys.
     Called automatically when :py:class:`gribmessage` instance created,
@@ -847,7 +1058,7 @@ cdef class gribmessage(object):
 
     :ivar messagenumber: The grib message number in the file.
 
-    :ivar projparams: A dictionary containing proj4 key/value pairs describing
+    :ivar projparams: A dictionary containing proj4 key/value pairs describing 
       the grid.  Set to ``None`` for unsupported grid types.
 
     :ivar expand_reduced:  If True (default), reduced lat/lon and gaussian grids
@@ -1085,7 +1296,7 @@ cdef class gribmessage(object):
                 keys.append(key)
         err = grib_keys_iterator_delete(gi)
         if err:
-            raise RuntimeError(grib_get_error_message(err))
+            raise RuntimeError(_get_error_message(err))
         # add extra python keys.
         if hasattr(self,'analDate'): keys.append('analDate')
         if hasattr(self,'validDate'): keys.append('validDate')
@@ -1110,7 +1321,7 @@ cdef class gribmessage(object):
             keys_noro.append(key)
         err = grib_keys_iterator_delete(gi)
         if err:
-            raise RuntimeError(grib_get_error_message(err))
+            raise RuntimeError(_get_error_message(err))
         keys_ro = []
         for key in self._all_keys:
             if key not in keys_noro:
@@ -1118,10 +1329,10 @@ cdef class gribmessage(object):
         return keys_ro
     def data(self,lat1=None,lat2=None,lon1=None,lon2=None):
         """
-        data(lat1=None,lat2=None,lon1=None,lon2=None)
+	data(lat1=None,lat2=None,lon1=None,lon2=None)
 
-        extract data, lats and lons for a subset region defined
-        by the keywords lat1,lat2,lon1,lon2.
+	extract data, lats and lons for a subset region defined
+	by the keywords lat1,lat2,lon1,lon2.
 
         The default values of lat1,lat2,lon1,lon2 are None, which
         means the entire grid is returned.
@@ -1129,7 +1340,7 @@ cdef class gribmessage(object):
         If the grid type is unprojected lat/lon and a geographic
         subset is requested (by using the lat1,lat2,lon1,lon2 keywords),
         then 2-d arrays are returned, otherwise 1-d arrays are returned.
-        """
+	"""
         data = self.values
         lats, lons = self.latlons()
         if lon1==lon2==lat1==lat2==None:
@@ -1177,7 +1388,7 @@ cdef class gribmessage(object):
         name = bytestr
         err = grib_get_native_type(self._gh, name, &typ)
         if err:
-            raise RuntimeError(grib_get_error_message(err))
+            raise RuntimeError(_get_error_message(err))
         elif typ == GRIB_TYPE_LONG:
             # is value an array or a scalar?
             datarr = np.asarray(value, int)
@@ -1188,7 +1399,7 @@ cdef class gribmessage(object):
                 longval = value
                 err = grib_set_long(self._gh, name, longval)
                 if err:
-                    raise RuntimeError(grib_get_error_message(err))
+                    raise RuntimeError(_get_error_message(err))
             else:
                 if key == 'values':
                     datarr = self._unshape_mask(datarr)
@@ -1197,7 +1408,7 @@ cdef class gribmessage(object):
                 size = datarr.size
                 err = grib_set_long_array(self._gh, name, <long *>datarr.data, size)
                 if err:
-                    raise RuntimeError(grib_get_error_message(err))
+                    raise RuntimeError(_get_error_message(err))
         elif typ == GRIB_TYPE_DOUBLE:
             # is value an array or a scalar?
             datarr = np.asarray(value, float)
@@ -1208,7 +1419,7 @@ cdef class gribmessage(object):
                 doubleval = value
                 err = grib_set_double(self._gh, name, doubleval)
                 if err:
-                    raise RuntimeError(grib_get_error_message(err))
+                    raise RuntimeError(_get_error_message(err))
             else:
                 if key == 'values':
                     datarr = self._unshape_mask(datarr)
@@ -1217,20 +1428,20 @@ cdef class gribmessage(object):
                 size = datarr.size
                 err = grib_set_double_array(self._gh, name, <double *>datarr.data, size)
                 if err:
-                    raise RuntimeError(grib_get_error_message(err))
+                    raise RuntimeError(_get_error_message(err))
         elif typ == GRIB_TYPE_STRING:
             size=len(value)
             bytestr = _strencode(value)
             strdata = bytestr
             err = grib_set_string(self._gh, name, strdata, &size)
             if err:
-                raise RuntimeError(grib_get_error_message(err))
+                raise RuntimeError(_get_error_message(err))
         else:
             raise ValueError("unrecognized grib type % d" % typ)
     def __getitem__(self, key):
         """
         access values associated with grib keys.
-
+        
         The key ``values`` will return the data associated with the grib message.
         The data is returned as a numpy array, or if missing values or a bitmap
         are present, a numpy masked array.  Reduced lat/lon or gaussian grid
@@ -1251,30 +1462,25 @@ cdef class gribmessage(object):
             if tolerate_badgrib:
                 return None
             else:
-                raise RuntimeError(grib_get_error_message(err))
+                raise RuntimeError(_get_error_message(err))
         err = grib_get_native_type(self._gh, name, &typ)
         # force 'paramId' to be size 1 (it returns a size of 7,
         # which is a relic from earlier versions of grib_api in which
         # paramId was a string and not an integer)
         if key=='paramId' and typ == GRIB_TYPE_LONG: size=1
         if err:
-            raise RuntimeError(grib_get_error_message(err))
+            raise RuntimeError(_get_error_message(err))
         elif typ == GRIB_TYPE_LONG:
             if size == 1: # scalar
                 err = grib_get_long(self._gh, name, &longval)
                 if err:
-                    raise RuntimeError(grib_get_error_message(err))
+                    raise RuntimeError(_get_error_message(err))
                 return longval
             else: # array
-                if self.has_key('jPointsAreConsecutive') and\
-                   self['jPointsAreConsecutive']:
-                    storageorder='F'
-                else:
-                    storageorder='C'
-                datarr = np.zeros(size, int, order=storageorder)
+                datarr = np.zeros(size, int)
                 err = grib_get_long_array(self._gh, name, <long *>datarr.data, &size)
                 if err:
-                    raise RuntimeError(grib_get_error_message(err))
+                    raise RuntimeError(_get_error_message(err))
                 if key == 'values':
                     return self._reshape_mask(datarr)
                 else:
@@ -1283,18 +1489,13 @@ cdef class gribmessage(object):
             if size == 1: # scalar
                 err = grib_get_double(self._gh, name, &doubleval)
                 if err:
-                    raise RuntimeError(grib_get_error_message(err))
+                    raise RuntimeError(_get_error_message(err))
                 return doubleval
             else: # array
-                if self.has_key('jPointsAreConsecutive') and\
-                   self['jPointsAreConsecutive']:
-                    storageorder='F'
-                else:
-                    storageorder='C'
-                datarr = np.zeros(size, np.double, order=storageorder)
+                datarr = np.zeros(size, np.double)
                 err = grib_get_double_array(self._gh, name, <double *>datarr.data, &size)
                 if err:
-                    raise RuntimeError(grib_get_error_message(err))
+                    raise RuntimeError(_get_error_message(err))
                 if key == 'values':
                     return self._reshape_mask(datarr)
                 else:
@@ -1303,7 +1504,7 @@ cdef class gribmessage(object):
             size=1024 # grib_get_size returns 1 ?
             err = grib_get_string(self._gh, name, strdata, &size)
             if err:
-                raise RuntimeError(grib_get_error_message(err))
+                raise RuntimeError(_get_error_message(err))
             msg = strdata.decode(default_encoding)
             return msg.rstrip()
         else:
@@ -1353,10 +1554,10 @@ cdef class gribmessage(object):
         name = bytestr
         err = grib_get_size(self._gh, name, &size)
         if err:
-            raise RuntimeError(grib_get_error_message(err))
+            raise RuntimeError(_get_error_message(err))
         err = grib_get_message(self._gh, &message, &size)
         if err:
-            raise RuntimeError(grib_get_error_message(err))
+            raise RuntimeError(_get_error_message(err))
         msg = PyBytes_FromStringAndSize(<char *>message, size)
         return msg
     def _unshape_mask(self, datarr):
@@ -1417,7 +1618,13 @@ cdef class gribmessage(object):
             return datarr
         if ny != GRIB_MISSING_LONG and nx != GRIB_MISSING_LONG and\
            self.expand_reduced:
-            datarr.shape = (ny,nx)
+            print (datarr.shape)
+            if self.has_key('jPointsAreConsecutive') and\
+                self['jPointsAreConsecutive']:
+                storageorder='F'
+            else:
+                storageorder='C'
+            datarr = datarr.reshape(ny, nx, order=storageorder)
         # check scan modes for rect grids.
         if datarr.ndim == 2:
            # columns scan in the -y direction (so flip)
@@ -1444,7 +1651,7 @@ cdef class gribmessage(object):
 
     def _set_projparams(self):
         """
-        sets the ``projparams`` instance variable to a dictionary containing
+        sets the ``projparams`` instance variable to a dictionary containing 
         proj4 key/value pairs describing the grid.
         """
         projparams = {}
@@ -1625,7 +1832,7 @@ cdef class gribmessage(object):
             lats = self['distinctLatitudes']
             if lat2 < lat1 and lats[-1] > lats[0]: lats = lats[::-1]
             lons = self['distinctLongitudes']
-            lons,lats = np.meshgrid(lons,lats)
+            lons,lats = np.meshgrid(lons,lats) 
         elif self['gridType'] == 'reduced_gg': # reduced global gaussian grid
             if self.expand_reduced:
                 lat1 = self['latitudeOfFirstGridPointInDegrees']
@@ -1637,7 +1844,7 @@ cdef class gribmessage(object):
                 lon1 = self['longitudeOfFirstGridPointInDegrees']
                 lon2 = self['longitudeOfLastGridPointInDegrees']
                 lons = np.linspace(lon1,lon2,nx)
-                lons,lats = np.meshgrid(lons,lats)
+                lons,lats = np.meshgrid(lons,lats) 
             else:
                 lats = self['latitudes']
                 lons = self['longitudes']
@@ -1651,7 +1858,7 @@ cdef class gribmessage(object):
                 lon2 = self['longitudeOfLastGridPointInDegrees']
                 lons = np.linspace(lon1,lon2,nx)
                 lats = np.linspace(lat1,lat2,ny)
-                lons,lats = np.meshgrid(lons,lats)
+                lons,lats = np.meshgrid(lons,lats) 
             else:
                 lats = self['latitudes']
                 lons = self['longitudes']
@@ -1835,6 +2042,221 @@ cdef class gribmessage(object):
             raise ValueError('unsupported grid %s' % self['gridType'])
         return lats, lons
 
+cdef class index(object):
+    """ 
+index(filename, *args)
+    
+returns grib index object given GRIB filename indexed by keys given in
+*args.  The :py:class:`select` or ``__call__`` method can then be used to selected grib messages
+based on specified values of indexed keys.
+Unlike :py:meth:`open.select`, containers or callables cannot be used to 
+select multiple key values.
+However, using :py:meth:`index.select` is much faster than :py:meth:`open.select`.
+
+**Warning**:  Searching for data within multi-field grib messages does not
+work using an index and is not supported by ECCODES library. NCEP
+often puts u and v winds together in a single multi-field grib message.  You
+will get incorrect results if you try to use an index to find data in these
+messages.  Use the slower, but more robust :py:meth:`open.select` in this case.
+
+If no key are given (i.e. *args is empty), it is assumed the filename represents a previously
+saved index (created using the ``grib_index_build`` tool or :py:meth:`index.write`) instead of a GRIB file.
+
+Example usage:
+
+>>> import pygrib
+>>> grbindx=pygrib.index('sampledata/gfs.grb','shortName','typeOfLevel','level')
+>>> grbindx.keys
+['shortName', 'level']
+>>> selected_grbs=grbindx.select(shortName='gh',typeOfLevel='isobaricInhPa',level=500)
+>>> for grb in selected_grbs:
+>>>     grb
+1:Geopotential height:gpm (instant):regular_ll:isobaricInhPa:level 500 Pa:fcst time 72 hrs:from 200412091200:lo res cntl fcst
+>>> # __call__ method does same thing as select
+>>> selected_grbs=grbindx(shortName='u',typeOfLevel='isobaricInhPa',level=250)
+>>> for grb in selected_grbs:
+>>>     grb
+1:u-component of wind:m s**-1 (instant):regular_ll:isobaricInhPa:level 250 Pa:fcst time 72 hrs:from 200412091200:lo res cntl fcst
+>>> grbindx.write('gfs.grb.idx') # save index to a file
+>>> grbindx.close()
+>>> grbindx = pygrib.index('gfs.grb.idx') # re-open index (no keys specified)
+>>> grbindx.keys # not set when opening a saved index file.
+None
+>>> for grb in selected_grbs:
+>>>     grb
+1:u-component of wind:m s**-1 (instant):regular_ll:isobaricInhPa:level 250 Pa:fcst time 72 hrs:from 200412091200:lo res cntl fcst
+
+:ivar keys: list of strings containing keys used in the index.  Set to ``None``
+  when opening a previously saved grib index file.
+
+:ivar types: if keys are typed, this list contains the type declarations
+  (``l``, ``s`` or ``d``). Type declarations are specified by appending to the key
+  name (i.e. ``level:l`` will search for values of ``level`` that are longs). Set
+  to ``None`` when opening a previously saved grib index file.
+"""
+    cdef grib_index *_gi
+    cdef public object keys, types, name
+    def __cinit__(self, filename, *args):
+        # initialize C level objects.
+        cdef grib_index *gi
+        cdef int err
+        cdef char *filenamec
+        cdef char *keys
+        bytestr = _strencode(filename)
+        filenamec = bytestr
+        if args == ():
+            #raise ValueError('no keys specified for index')
+            # assume filename is a saved index.
+            self._gi = grib_index_read(NULL, filenamec, &err)
+            if err:
+                raise RuntimeError(_get_error_message(err))
+        else:
+            bytestr = _strencode(','.join(args))
+            keys = bytestr
+            self._gi = grib_index_new_from_file (NULL, filenamec, keys, &err)
+            if err:
+                raise RuntimeError(_get_error_message(err))
+            grbs = open(filename)
+            if grbs.has_multi_field_msgs:
+                msg="""
+file %s has multi-field messages, keys inside multi-field
+messages will not be indexed correctly""" % filename
+                warnings.warn(msg)
+            grbs.close()
+    def __init__(self, filename, *args):
+        # initalize Python level objects
+        self.name = filename
+        self.keys = None
+        self.types = None
+        if args != ():
+            # is type is specified, strip it off.
+            keys = [arg.split(':')[0] for arg in args]
+            # if type is declared, save it (None if not declared)
+            types = []
+            for arg in args:
+                try: 
+                    type = arg.split(':')[1]
+                except IndexError:
+                    type = None
+                types.append(type)
+            self.keys = keys
+            self.types = types
+    def __call__(self, **kwargs):
+        """same as :py:meth:`select`"""
+        return self.select(**kwargs)
+    def select(self, **kwargs):
+        """
+select(**kwargs)
+
+return a list of :py:class:`gribmessage` instances from grib index object 
+corresponding to specific values of indexed keys (given by kwargs).
+Unlike :py:meth:`open.select`, containers or callables cannot be used to 
+select multiple key values.
+However, using :py:meth:`index.select` is much faster than :py:meth:`open.select`.
+
+Example usage:
+
+>>> import pygrib
+>>> grbindx=pygrib.index('sampledata/gfs.grb','shortName','typeOfLevel','level')
+>>> selected_grbs=grbindx.select(shortName='gh',typeOfLevel='isobaricInhPa',level=500)
+>>> for grb in selected_grbs:
+>>>     grb
+1:Geopotential height:gpm (instant):regular_ll:isobaricInhPa:level 500 Pa:fcst time 72 hrs:from 200412091200:lo res cntl fcst
+>>> # __call__ method does same thing as select
+>>> selected_grbs=grbindx(shortName='u',typeOfLevel='isobaricInhPa',level=250)
+>>> for grb in selected_grbs:
+>>>     grb
+1:u-component of wind:m s**-1 (instant):regular_ll:isobaricInhPa:level 250 Pa:fcst time 72 hrs:from 200412091200:lo res cntl fcst
+>>> grbindx.close()
+"""
+        cdef grib_handle *gh
+        cdef int err
+        cdef size_t size
+        cdef long longval
+        cdef double doubval
+        cdef char *strval
+        cdef char *key
+        # set index selection.
+        # used declared type if available, other infer from type of value.
+        sizetot = 0
+        for k,v in kwargs.items():
+            if self.keys is not None and k not in self.keys:
+                raise KeyError('key not part of grib index')
+            if self.types is not None:
+                typ = self.types[self.keys.index(k)]
+            else:
+                typ = None
+            bytestr = _strencode(k)
+            key = bytestr
+            err = grib_index_get_size(self._gi, key, &size)
+            if err:
+                raise RuntimeError(_get_error_message(err))
+            sizetot = sizetot + size
+            # if there are no matches for this key, just skip it
+            if not size:
+                continue
+            if typ == 'l' or (type(v) == int or type(v) == long):
+                longval = long(v)
+                err = grib_index_select_long(self._gi, key, longval)
+                if err:
+                    raise RuntimeError(_get_error_message(err))
+            elif typ == 'd' or type(v) == float:
+                doubval = float(v)
+                err = grib_index_select_double(self._gi, key, doubval)
+                if err:
+                    raise RuntimeError(_get_error_message(err))
+            elif typ == 's' or _is_stringlike(v):
+                bytestr = _strencode(v)
+                strval = bytestr
+                err = grib_index_select_string(self._gi, key, strval)
+                if err:
+                    raise RuntimeError(_get_error_message(err))
+            else:
+                raise TypeError('value must be float, int or string')
+        # if no matches found, raise an error.
+        if sizetot == 0:
+            raise ValueError('no matches found')
+        # create a list of grib messages corresponding to selection.
+        messagenumber = 0; grbs = []
+        while 1:
+            gh = grib_handle_new_from_index(self._gi, &err)
+            if err or gh == NULL:
+                break
+            else:
+                messagenumber = messagenumber + 1
+            grbs.append(_create_gribmessage(gh, messagenumber, True))
+            err = grib_handle_delete(gh)
+            if err:
+                raise RuntimeError(_get_error_message(err))
+        if not grbs:
+            raise ValueError('no matches found')
+        # return the list of grib messages.
+        return grbs
+    def write(self,filename):
+        """
+        write(filename)
+
+        save grib index to file"""
+        cdef char * filenamec
+        bytestr = _strencode(filename)
+        filenamec = bytestr
+        err = grib_index_write(self._gi, filenamec);
+        if err:
+            raise RuntimeError(_get_error_message(err))
+    def close(self):
+        """
+        close()
+
+        deallocate C structures associated with class instance"""
+        grib_index_delete(self._gi)
+        self._gi = NULL
+
+    def __dealloc__(self):
+        # deallocate storage when there are no more references
+        # to the object.
+        if self._gi != NULL:
+            grib_index_delete(self._gi)
+
 def _is_stringlike(a):
     if type(a) == str or type(a) == bytes or type(a) == unicode:
         return True
@@ -1882,8 +2304,10 @@ cdef _strencode(pystr,encoding=None):
     except AttributeError:
         return pystr # already bytes?
 
-class StartOfMessage(Exception):
-    pass
+cdef unicode _get_error_message(int code):
+    bytes_ = grib_get_error_message(code)
+    return bytes_.decode('ascii', 'strict')
+
 
 class EndOfFile(Exception):
     pass
@@ -1917,8 +2341,6 @@ cdef build_message_index(FILE *fp):
             prev_sections[section_number] = (section_offset, section_length)
             if section_number == 7:
                index.append(prev_sections[:])
-        except StartOfMessage:
-            assert False
         except EndOfFile:
             break
     return index
