@@ -2339,7 +2339,7 @@ cdef build_message_index(FILE *fp):
         try:
             section_number, section_offset, section_length, sixth_byte = skip_section(fp)
             if section_number == 6 and sixth_byte == 254:
-                # Handle inherited bitmap
+                # Inherit the bitmap from the previous section 6.
                 pass
             else:
                 prev_sections[section_number] = (section_offset,
