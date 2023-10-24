@@ -194,6 +194,7 @@ cdef extern from "grib_api.h":
 
     void kp_grib_load_entire_blob(grib_context * c, FILE *f, int *error);
     grib_handle * kp_grib2_handle_new_from_sections( grib_context *c,  FILE *f, long section_offsets[], size_t sections_len[], int *error );
+    # void kp_break();
 
 
 missingvalue_int = GRIB_MISSING_LONG
@@ -515,6 +516,8 @@ cdef class open(object):
         if err:
             raise RuntimeError(_get_error_message(err))
         if gh == NULL:
+            # This path gets taken only if an usual condition is detected.
+            # Hitting end of file will not cause 'gh' to be NULL.
             raise StopIteration
         else:
             self._gh = gh
@@ -628,10 +631,19 @@ cdef class open(object):
         # before rewinding, move iterator to end of file
         # to make sure it is not left in a funky state
         # (such as in the middle of a multi-part message, issue 54)
+        assert (0)
+
+        # This implementation is broken as 'grib_handle_new_from_file()'
+        # does not return NULL when the end of file is hit
+        # at 66e68d63f4769ef8a1d1ab380bd25e373d620dae.
         while 1:
             gh = grib_handle_new_from_file(NULL, self._fd, &err)
             err = grib_handle_delete(gh)
             if gh == NULL: break
+        fseek(self._fd, self._offset, SEEK_SET)
+        self.messagenumber = 0
+
+    def kp_rewind(self):
         fseek(self._fd, self._offset, SEEK_SET)
         self.messagenumber = 0
 
@@ -767,11 +779,14 @@ Example usage:
         cdef int ouch_b = 0
         cdef int ouch_c = 0
         cdef int ouch_d = 0
-        while 1:
+        cdef int err = 0;
+        while msgNum < self.messages:
             gh = grib_handle_new_from_file(NULL, self._fd, &err)
-            msgNum += 1
-            if gh == NULL:
+            if gh == NULL or err != 0:
+                # Note that grib_handle_new_from_file() does not return NULL
+                # when the end of file is reached.
                 break
+            msgNum += 1
             grib_get_long(gh, "backgroundProcess", &val)
             if val != datakind_id:
                 if ouch_a == 0:
@@ -865,8 +880,9 @@ Example usage:
                 params_bin.pop(forecast_time_step)
 
             err = grib_handle_delete(gh)
+            assert(err == 0)
 
-        self.rewind()
+        self.kp_rewind()
 
         if ouch_a or ouch_b or ouch_c or ouch_d:
             print (f'{PPID} Ignores: {ouch_a} {ouch_b} {ouch_c} {ouch_d}')
