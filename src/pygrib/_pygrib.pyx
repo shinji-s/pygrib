@@ -481,7 +481,7 @@ cdef class open(object):
         assert(self._offset == 0);
         fseek(self._fd, self._offset, SEEK_SET)
         self.messages = len(self.message_index)
-        self.has_multi_field_msgs = 0 < self.messages
+        self.has_multi_field_msgs = 2 <= self.messages
 
         # # count number of messages in file.
         # nmsgs = 0
