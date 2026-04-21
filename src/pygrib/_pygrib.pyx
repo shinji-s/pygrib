@@ -531,7 +531,7 @@ cdef class open(object):
             grbs = [self.message(n) for n in xrange(beg,end,inc)]
             self.seek(msg) # put iterator back in original position
             return grbs
-        elif type(key) == int or type(key) == long:
+        elif type(key) == int:
             # for an integer, return a single grib message.
             msg = self.tell()
             grb = self.message(key)
@@ -1289,7 +1289,7 @@ cdef class gribmessage(object):
         """
         cdef grib_keys_iterator* gi
         cdef int err, typ
-        cdef char *name
+        cdef const char *name
         # use cached keys if they exist.
         if self._all_keys is not None: return self._all_keys
         # if not, get keys from grib file.
@@ -1325,7 +1325,7 @@ cdef class gribmessage(object):
         """
         cdef grib_keys_iterator* gi
         cdef int err, typ
-        cdef char *name
+        cdef const char *name
         if self._all_keys is None:
             self._all_keys = self.keys()
         gi = grib_keys_iterator_new(self._gh,\
@@ -1563,7 +1563,7 @@ cdef class gribmessage(object):
         """
         cdef int err
         cdef size_t size
-        cdef void *message
+        cdef const void *message
         cdef char *name
         cdef FILE *out
         bytestr = b'values'
@@ -2210,9 +2210,8 @@ Example usage:
             # if there are no matches for this key, just skip it
             if not size:
                 continue
-            if typ == 'l' or (type(v) == int or type(v) == long):
-                longval = long(v)
-                err = grib_index_select_long(self._gi, key, longval)
+            if typ == 'l' or type(v) == int:
+                err = grib_index_select_long(self._gi, key, v)
                 if err:
                     raise RuntimeError(_get_error_message(err))
             elif typ == 'd' or type(v) == float:
@@ -2320,6 +2319,7 @@ cdef _strencode(pystr,encoding=None):
         return pystr # already bytes?
 
 cdef unicode _get_error_message(int code):
+    cdef const char * bytes_;
     bytes_ = grib_get_error_message(code)
     return bytes_.decode('ascii', 'strict')
 
