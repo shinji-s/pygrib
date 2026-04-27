@@ -2413,6 +2413,7 @@ cdef _strencode(pystr,encoding=None):
         return pystr # already bytes?
 
 cdef unicode _get_error_message(int code):
+    cdef const char * bytes_;
     bytes_ = grib_get_error_message(code)
     return bytes_.decode('ascii', 'strict')
 
