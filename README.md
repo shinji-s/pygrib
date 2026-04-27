@@ -1,4 +1,4 @@
-[![Install and Test Status](https://github.com/jswhit/pygrib/workflows/Install%20and%20Test/badge.svg)](https://github.com/jswhit/pygrib/actions)
+[![Install and Test Status](https://github.com/jswhit/pygrib/actions/workflows/build.yml/badge.svg?branch=master)](https://github.com/jswhit/pygrib/actions)
 [![PyPI package](https://badge.fury.io/py/pygrib.svg)](http://python.org/pypi/pygrib)
 [![Anaconda-Server Badge](https://anaconda.org/conda-forge/pygrib/badges/version.svg)](https://anaconda.org/conda-forge/pygrib)
 [![DOI](https://zenodo.org/badge/28599617.svg)](https://zenodo.org/badge/latestdoi/28599617)
@@ -22,7 +22,7 @@ You can also use [conda](https://docs.conda.io/en/latest/):
 conda install -c conda-forge pygrib
 ```
 
-Alternately, clone the github repo and run `python setup.py install` (after setting `$ECCCODES_DIR`)
+Alternately, clone the github repo and run `pip install -e .` (after setting `$ECCCODES_DIR`)
 where `$ECCODES_DIR` is the path to the directory containing `include/grib_api.h`
 and `lib/libeccodes.so`. If `ECCODES_DIR` is not specified, a few common locations
 such as `$CONDA_PREFIX,/usr,/usr/local,/opt/local` will be searched.
@@ -33,5 +33,4 @@ Sample [IPython](http://ipython.org/) notebooks illustrating pygrib usage:
 * http://nbviewer.jupyter.org/gist/jswhit/8635665
 * https://github.com/scollis/HRRR/blob/master/notebooks/HRRR%20Grib.ipynb
 
-Questions or comments - contact Jeff Whitaker <jeffrey.s.whitaker@noaa.gov>
-or use https://github.com/jswhit/pygrib/issues.
+Questions or problems use https://github.com/jswhit/pygrib/issues

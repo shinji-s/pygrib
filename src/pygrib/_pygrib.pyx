@@ -1,79 +1,95 @@
 """pygrib module"""
 
-__version__ = '2.1.4'
+__version__ = '2.1.8'
 
 import numpy as np
 cimport numpy as npc
+cimport cython
 import warnings
 import os
 from datetime import datetime
-from io import BufferedReader
-from pathlib import Path
-from pkg_resources import parse_version
+from io import BufferedReader, UnsupportedOperation
+from os import PathLike
+from packaging import version
 from typing import List
+
 from numpy import ma
+from cpython.buffer cimport PyObject_GetBuffer, PyBuffer_Release, PyBUF_SIMPLE
 import pyproj
-#import_array()
-from cpython cimport array
-import array
+
+npc.import_array()
+#from cpython cimport array
+#import array
 
 PPID = f'PPID:{os.getppid()}'
 
 HRNC_DATAKIND_ID = 151
 
-cdef _redtoreg(object nlonsin, npc.ndarray lonsperlat, npc.ndarray redgrid, \
-              object missval):
+# Print scalars legacy style (e.g. (15.0) not np.float64(15.0))
+# https://numpy.org/doc/2.2/release/2.0.0-notes.html#representation-of-numpy-scalars-changed
+if np.lib.NumpyVersion(np.__version__) >= '2.0.0':
+    np.set_printoptions(legacy="1.25")
+
+ctypedef fused float_type:
+    float
+    double
+ctypedef fused int_type:
+    int
+    long
+    long long
+
+__has_fmemopen__ = HAS_FMEMOPEN
+
+def redtoreg(float_type[:] redgrid_data, int_type[:] lonsperlat, missval=None):
     """
-    convert data on global reduced gaussian to global
-    full gaussian grid using linear interpolation.
+    redtoreg(redgrid_data, lonsperlat, missval=None)
+
+    Takes 1-d array on ECMWF reduced gaussian grid (redgrid_data), linearly interpolates
+    to corresponding regular gaussian grid.
+
+    Reduced gaussian grid defined by lonsperlat array, regular gaussian
+    grid has the same number of latitudes and max(lonsperlat) longitudes.
+
+    Includes handling of missing values using nearest neighbor interpolation.
     """
-    cdef long i, j, n, im, ip, indx, ilons, nlats, npts
-    cdef double zxi, zdx, flons, missvl
-    cdef npc.ndarray reggrid
-    cdef double *redgrdptr
-    cdef double *reggrdptr
-    cdef long *lonsptr
-    nlons = nlonsin
-    nlats = len(lonsperlat)
-    npts = len(redgrid)
-    if lonsperlat.sum() != npts:
-        msg='size of reduced grid does not match number of data values'
-        raise ValueError(msg)
-    reggrid = missval*np.ones((nlats,nlons),np.double)
-    # get data buffers and cast to desired type.
-    lonsptr = <long *>lonsperlat.data
-    redgrdptr = <double *>redgrid.data
-    reggrdptr = <double *>reggrid.data
-    missvl = <double>missval
-    # iterate over full grid, do linear interpolation.
-    n = 0
+
+    cdef cython.Py_ssize_t nlons = np.max(lonsperlat)
+    cdef cython.Py_ssize_t nlats = lonsperlat.shape[0]
+    cdef cython.Py_ssize_t i,j,indx,ilons,im,ip,nlona
+    cdef float_type zxi, zdx, flons, missvalc
+    if float_type is float:
+        float_dtype = np.float32
+    elif float_type is double:
+        float_dtype = np.double
+    if missval is None:
+        missval = np.nan
+    missvalc = missval
+    reggrid_data = np.full((nlats, nlons), missval, float_dtype)
+    cdef float_type[:, ::1] reggrid_data_view = reggrid_data
     indx = 0
-    for j from 0 <= j < nlats:
-        ilons = lonsptr[j]
-        flons = <double>ilons
-        for i from 0 <= i < nlons:
-            # zxi is the grid index (relative to the reduced grid)
-            # of the i'th point on the full grid. 
-            zxi = i * flons / nlons # goes from 0 to ilons
-            im = <long>zxi
-            zdx = zxi - <double>im
-            if ilons != 0:
+    for j in range(nlats):
+        ilons = lonsperlat[j]; flons = ilons
+        if ilons != 0:
+            for i in range(nlons):
+                # zxi is the grid index (relative to the reduced grid)
+                # of the i'th point on the full grid.
+                zxi = i * flons / nlons # goes from 0 to ilons
+                im = <cython.Py_ssize_t>zxi; zdx = zxi - im
                 im = (im + ilons)%ilons
                 ip = (im + 1 + ilons)%ilons
                 # if one of the nearest values is missing, use nearest
                 # neighbor interpolation.
-                if redgrdptr[indx+im] == missvl or\
-                   redgrdptr[indx+ip] == missvl: 
+                if redgrid_data[indx+im] == missvalc or\
+                   redgrid_data[indx+ip] == missvalc: 
                     if zdx < 0.5:
-                        reggrdptr[n] = redgrdptr[indx+im]
+                        reggrid_data_view[j,i] = redgrid_data[indx+im]
                     else:
-                        reggrdptr[n] = redgrdptr[indx+ip]
+                        reggrid_data_view[j,i] = redgrid_data[indx+ip]
                 else: # linear interpolation.
-                    reggrdptr[n] = redgrdptr[indx+im]*(1.-zdx) +\
-                                   redgrdptr[indx+ip]*zdx
-            n = n + 1
-        indx = indx + ilons
-    return reggrid
+                    reggrid_data_view[j,i] = redgrid_data[indx+im]*(1.-zdx) +\
+                                             redgrid_data[indx+ip]*zdx
+            indx = indx + ilons
+    return reggrid_data
 
 cdef extern from "stdlib.h":
     ctypedef long size_t
@@ -97,6 +113,9 @@ cdef extern from "string.h":
 
 cdef extern from "./portable.h":
     int wrap_dup(int)
+    FILE *fmemopen(void *buf, size_t size, char *mode)
+    cdef enum:
+        HAS_FMEMOPEN
 
 cdef extern from "Python.h":
     object PyBytes_FromStringAndSize(char *s, size_t size)
@@ -114,9 +133,8 @@ cdef extern from "numpy/arrayobject.h":
     npy_intp PyArray_SIZE(ndarray arr)
     npy_intp PyArray_ISCONTIGUOUS(ndarray arr)
     npy_intp PyArray_ISALIGNED(ndarray arr)
-    void import_array()
 
-cdef extern from "grib_api.h":
+cdef extern from "eccodes.h":
     ctypedef struct grib_handle
     ctypedef struct grib_index
     ctypedef struct grib_keys_iterator
@@ -154,14 +172,14 @@ cdef extern from "grib_api.h":
     int grib_set_string(grib_handle *h, char *name, char *mesg, size_t *size)
     grib_keys_iterator* grib_keys_iterator_new(grib_handle* h,unsigned long filter_flags, char* name_space)
     int grib_keys_iterator_next(grib_keys_iterator *kiter)
-    char* grib_keys_iterator_get_name(grib_keys_iterator *kiter)
+    const char* grib_keys_iterator_get_name(grib_keys_iterator *kiter)
     int grib_handle_delete(grib_handle* h)
     grib_handle* grib_handle_new_from_file(grib_context* c, FILE* f, int* error)        
-    char* grib_get_error_message(int code)
+    const char* grib_get_error_message(int code)
     int grib_keys_iterator_delete( grib_keys_iterator* kiter)
     void grib_multi_support_on(grib_context* c)
     void grib_multi_support_off(grib_context* c)
-    int grib_get_message(grib_handle* h ,  void** message,size_t *message_length)
+    int grib_get_message(grib_handle* h , const void** message,size_t *message_length)
     int grib_get_message_copy(grib_handle* h ,  void* message,size_t *message_length)
     long grib_get_api_version()
     grib_handle* grib_handle_clone(grib_handle* h)
@@ -209,6 +227,7 @@ def _get_grib_api_version():
     major = v
     return "%d.%d.%d" % (major,minor,revision)
 grib_api_version = _get_grib_api_version()
+eccodes_version = grib_api_version
 if grib_api_version < "2.19.1":
     msg="Warning: ecCodes 2.19.1 or higher is recommended. You are running"
     warnings.warn('%s %s.' % (msg,grib_api_version))
@@ -408,7 +427,7 @@ cdef class open(object):
     open(filepath_or_buffer)
 
     returns GRIB file iterator object given GRIB file path (:py:class:`str` or
-    :py:class:`pathlib.Path` object) or buffer (:py:class:`io.BufferedReader` object).
+    :py:class:`os.PathLike` object) or buffer (:py:class:`io.BufferedReader` object).
     When iterated, returns
     instances of the :py:class:`gribmessage` class. Behaves much like a python file
     object, with :py:meth:`seek`, :py:meth:`tell`, :py:meth:`read`
@@ -431,43 +450,69 @@ cdef class open(object):
     cdef FILE *_fd
     cdef grib_handle *_gh
     cdef long _offset
-    cdef object _inner
     cdef public object name, messagenumber, messages, closed,\
                        has_multi_field_msgs
+    cdef object _inner, _buffer_allocated
+    cdef Py_buffer _buffer
     cdef list message_index
 
     def __cinit__(self, filename):
         # initialize C level objects.
         cdef grib_handle *gh
         cdef FILE *_fd
+
+        self._buffer_allocated = False
         if isinstance(filename, BufferedReader):
-            fileno = wrap_dup(filename.fileno())
-            self._fd = fdopen(fileno, "rb")
-            self._offset = filename.tell()
-            self._inner = filename
-            # since BufferedReader has its own read buffer,
-            # BufferedReader.seek() sometimes just changes its
-            # internal position and BufferedReader.tell() returns
-            # a calculated value, we need to ensure the actual
-            # position by fseek().
-            fseek(self._fd, self._offset, SEEK_SET)
+            try:
+                fileno = wrap_dup(filename.fileno())
+            except UnsupportedOperation:
+                fileno = None
+            if fileno is not None:
+                self._fd = fdopen(fileno, "rb")
+                self._offset = filename.tell()
+                self._inner = filename
+                # since BufferedReader has its own read buffer,
+                # BufferedReader.seek() sometimes just changes its
+                # internal position and BufferedReader.tell() returns
+                # a calculated value, we need to ensure the actual
+                # position by fseek().
+                fseek(self._fd, self._offset, SEEK_SET)
+            else:
+                if not HAS_FMEMOPEN:
+                    raise NotImplementedError('reading from a byte stream not implemented on windows')
+                buf = filename.read()
+                if PyObject_GetBuffer(buf, &self._buffer, PyBUF_SIMPLE) != 0:
+                    raise MemoryError("Could not get memory buffer from BufferedReader object.")
+                self._buffer_allocated = True
+                self._fd = fmemopen(<char*>self._buffer.buf, <size_t>self._buffer.len, 'rb')
+                self._offset = 0
+                self._inner = None
         else:
-            if isinstance(filename, Path):
-                filename = str(filename)
+            if isinstance(filename, PathLike):
+                bytestr = os.fsencode(filename)
+            else:
+                bytestr = _strencode(filename)
             bytestr = _strencode(filename)
             self._fd = fopen(bytestr, "rb")
             self._offset = 0
             self._inner = None
         if self._fd == NULL:
-            raise IOError("could not open %s", filename)
+            raise OSError("could not open {}".format(filename))
         self._gh = NULL
     def __init__(self, filename):
         cdef int err, ncount
         cdef grib_handle *gh
         # initalize Python level objects
         if isinstance(filename, BufferedReader):
-            self.name = filename.name
-        elif isinstance(filename, Path):
+            try:
+                self.name = filename.name
+            except AttributeError:
+                self.name = None
+        elif isinstance(filename, PathLike):
+            try:
+                self.name = filename.name
+            except AttributeError:
+                self.name = None
             self.name = str(filename)
         else:
             self.name = filename
@@ -501,6 +546,27 @@ cdef class open(object):
         # else:
         #     self.has_multi_field_msgs=False
         # fseek(self._fd, self._offset, SEEK_SET)
+
+        # # count number of messages in file.
+        # nmsgs = 0
+        # while 1:
+        #     gh = grib_handle_new_from_file(NULL, self._fd, &err)
+        #     err = grib_handle_delete(gh)
+        #     if gh == NULL: break
+        #     nmsgs = nmsgs + 1
+        # fseek(self._fd, self._offset, SEEK_SET)
+        # self.messages = nmsgs 
+        # err =  grib_count_in_file(NULL, self._fd, &ncount)
+        # # if number of messages returned by grib_count_in_file
+        # # differs from brute-force method of counting, then
+        # # there must be multi-field messages in the file.
+        # if ncount != self.messages:
+        #     self.has_multi_field_msgs=True
+        # else:
+        #     self.has_multi_field_msgs=False
+        # fseek(self._fd, self._offset, SEEK_SET)
+    def __len__(self):
+        return self.messages
     def __iter__(self):
         return self
     def __next__(self):
@@ -531,7 +597,7 @@ cdef class open(object):
             grbs = [self.message(n) for n in xrange(beg,end,inc)]
             self.seek(msg) # put iterator back in original position
             return grbs
-        elif type(key) == int or type(key) == long:
+        elif type(key) == int:
             # for an integer, return a single grib message.
             msg = self.tell()
             grb = self.message(key)
@@ -616,6 +682,9 @@ cdef class open(object):
             err = grib_handle_delete(self._gh)
             if err:
                 raise RuntimeError(_get_error_message(err))
+        if self._buffer_allocated:
+            PyBuffer_Release(&self._buffer)
+            self._buffer_allocated = False
         self.closed = True
         self._fd = NULL
 
@@ -625,6 +694,9 @@ cdef class open(object):
         cdef int err
         if self._fd:
             fclose(self._fd)
+        if self._buffer_allocated:
+            PyBuffer_Release(&self._buffer)
+            self._buffer_allocated = False
 
     def rewind(self):
         """rewind iterator (same as ``seek(0)``)"""
@@ -732,6 +804,7 @@ Example usage:
         cdef int saved_messagenumber
         if nmsgs < 0: 
             raise ValueError('nmsgs must be >= 0 in _advance')
+
         saved_messagenumber = self.messagenumber
         self.messagenumber += nmsgs
         if self.messages < self.messagenumber:
@@ -899,6 +972,19 @@ Example usage:
                 work_queue.put((datakind_id, pixel_type, step_unit,
                                 (fct, params, indices_bin[fct])))
 
+        # if return_msgs: grbs=[]
+        # for n in range(self.messagenumber,self.messagenumber+nmsgs):
+        #     err = grib_handle_delete(self._gh)
+        #     if err:
+        #         raise RuntimeError(_get_error_message(err))
+        #     self._gh = grib_handle_new_from_file(NULL, self._fd, &err)
+        #     if err:
+        #         raise RuntimeError(_get_error_message(err))
+        #     if self._gh == NULL:
+        #         raise IOError('not that many messages in file')
+        #     self.messagenumber = self.messagenumber + 1
+        #     if return_msgs: grbs.append(_create_gribmessage(self._gh, self.messagenumber))
+        # if return_msgs: return grbs
 
 # keep track of python gribmessage attributes so they can be
 # distinguished from grib keys.
@@ -987,19 +1073,17 @@ def setdates(gribmessage grb):
        grb.indicatorOfUnitOfTimeRange in _ftimedict:
         grb.fcstimeunits = _ftimedict[grb.indicatorOfUnitOfTimeRange]
     if grb.has_key('forecastTime'):
-        if grb.has_key('forecastTime'):
-            ftime = grb.forecastTime
-        elif grb.has_key('stepRange'):
-            # if forecastTime doesn't exist, use end of stepRange.
-            ftime = grb['stepRange'] # computed key, uses stepUnits
-            # if it's a range, use the end of the range to define validDate
-            try: 
-                ftime = float(ftime.split('-')[1])
-            except:
-                ftime = None
-    else:
-        ftime = 0
-    if ftime is None: ftime = 0. # make sure ftime is not None
+        ftime = grb.forecastTime
+    elif grb.has_key('stepRange'):
+        # if forecastTime doesn't exist, use end of stepRange.
+        ftime = grb['stepRange'] # computed key, uses stepUnits
+        if grb.has_key('stepUnits') and grb.stepUnits in _ftimedict:
+            grb.fcstimeunits = _ftimedict[grb.stepUnits]
+        # if it's a range, use the end of the range to define validDate
+        try: 
+            ftime = float(ftime.split('-')[1])
+        except:
+            ftime = 0.
     if grb.has_key('julianDay'):
         # don't do anything if datetime fails (because of a miscoded julianDay)
         try:
@@ -1179,9 +1263,9 @@ cdef class gribmessage(object):
             ftime = self['stepRange'] # computed key, uses stepUnits
             if self.valid_key('stepType') and self['stepType'] != 'instant':
                 inventory.append(':fcst time %s %s (%s)'%\
-                    (ftime,self.fcstimeunits,self.stepType))
+                    (ftime,_ftimedict[self.stepUnits],self.stepType))
             else:
-                inventory.append(':fcst time %s %s'% (ftime,self.fcstimeunits))
+                inventory.append(':fcst time %s %s'% (ftime,_ftimedict[self.stepUnits]))
         elif self.valid_key('forecastTime'):
             ftime = repr(self['forecastTime'])
             inventory.append(':fcst time %s %s'% (ftime,self.fcstimeunits))
@@ -1289,7 +1373,7 @@ cdef class gribmessage(object):
         """
         cdef grib_keys_iterator* gi
         cdef int err, typ
-        cdef char *name
+        cdef const char *name
         # use cached keys if they exist.
         if self._all_keys is not None: return self._all_keys
         # if not, get keys from grib file.
@@ -1325,7 +1409,7 @@ cdef class gribmessage(object):
         """
         cdef grib_keys_iterator* gi
         cdef int err, typ
-        cdef char *name
+        cdef const char *name
         if self._all_keys is None:
             self._all_keys = self.keys()
         gi = grib_keys_iterator_new(self._gh,\
@@ -1407,7 +1491,7 @@ cdef class gribmessage(object):
             raise RuntimeError(_get_error_message(err))
         elif typ == GRIB_TYPE_LONG:
             # is value an array or a scalar?
-            datarr = np.asarray(value, int)
+            datarr = np.asarray(value, np.int_)
             is_array = False
             if datarr.shape:
                 is_array = True
@@ -1493,7 +1577,12 @@ cdef class gribmessage(object):
                     raise RuntimeError(_get_error_message(err))
                 return longval
             else: # array
-                datarr = np.zeros(size, int)
+                if os.name == 'nt':
+                    # this should not be necessary since np.int_ should
+                    # be platform-dependent long, which should map to 32-bits on windows?
+                    datarr = np.zeros(size, np.int32)
+                else:
+                    datarr = np.zeros(size, np.int_)
                 err = grib_get_long_array(self._gh, name, <long *>datarr.data, &size)
                 if err:
                     raise RuntimeError(_get_error_message(err))
@@ -1563,7 +1652,7 @@ cdef class gribmessage(object):
         """
         cdef int err
         cdef size_t size
-        cdef void *message
+        cdef const void *message
         cdef char *name
         cdef FILE *out
         bytestr = b'values'
@@ -1619,8 +1708,9 @@ cdef class gribmessage(object):
             else:
                 missval = 1.e30
             if self.expand_reduced:
-                nx = 2*ny
-                datarr = _redtoreg(2*ny, self['pl'], datarr, missval)
+                lonsperlat = self['pl']
+                nx = lonsperlat.max()
+                datarr = redtoreg(datarr, lonsperlat, missval=missval)
             else:
                 nx = None
         elif self.has_key('Nx') and self.has_key('Ny'):
@@ -1699,7 +1789,7 @@ cdef class gribmessage(object):
                 else:
                     scalea = 1.
                     scaleb = 1.
-                if parse_version(grib_api_version) < parse_version('1.9.0'):
+                if version.parse(grib_api_version) < version.parse('1.9.0'):
                     projparams['a']=self['scaledValueOfMajorAxisOfOblateSpheroidEarth']*scalea
                     projparams['b']=self['scaledValueOfMinorAxisOfOblateSpheroidEarth']*scaleb
                 else:
@@ -1845,7 +1935,8 @@ cdef class gribmessage(object):
             lat1 = self['latitudeOfFirstGridPointInDegrees']
             lat2 = self['latitudeOfLastGridPointInDegrees']
             lats = self['distinctLatitudes']
-            if lat2 < lat1 and lats[-1] > lats[0]: lats = lats[::-1]
+            if self['Nj'] > 1:
+                if lat2 < lat1 and lats[-1] > lats[0]: lats = lats[::-1]
             lons = self['distinctLongitudes']
             lons,lats = np.meshgrid(lons,lats) 
         elif self['gridType'] == 'reduced_gg': # reduced global gaussian grid
@@ -1855,7 +1946,8 @@ cdef class gribmessage(object):
                 lats = self['distinctLatitudes']
                 if lat2 < lat1 and lats[-1] > lats[0]: lats = lats[::-1]
                 ny = self['Nj']
-                nx = 2*ny
+                lonsperlat = self['pl']
+                nx = lonsperlat.max()
                 lon1 = self['longitudeOfFirstGridPointInDegrees']
                 lon2 = self['longitudeOfLastGridPointInDegrees']
                 lons = np.linspace(lon1,lon2,nx)
@@ -1866,7 +1958,8 @@ cdef class gribmessage(object):
         elif self['gridType'] == 'reduced_ll': # reduced lat/lon grid
             if self.expand_reduced:
                 ny = self['Nj']
-                nx = 2*ny
+                lonsperlat = self['pl']
+                nx = lonsperlat.max()
                 lat1 = self['latitudeOfFirstGridPointInDegrees']
                 lat2 = self['latitudeOfLastGridPointInDegrees']
                 lon1 = self['longitudeOfFirstGridPointInDegrees']
@@ -2210,8 +2303,8 @@ Example usage:
             # if there are no matches for this key, just skip it
             if not size:
                 continue
-            if typ == 'l' or (type(v) == int or type(v) == long):
-                longval = long(v)
+            if typ == 'l' or (type(v) == int):
+                longval = int(v)
                 err = grib_index_select_long(self._gi, key, longval)
                 if err:
                     raise RuntimeError(_get_error_message(err))
