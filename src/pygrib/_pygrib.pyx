@@ -18,7 +18,7 @@ from cpython.buffer cimport PyObject_GetBuffer, PyBuffer_Release, PyBUF_SIMPLE
 import pyproj
 
 npc.import_array()
-#from cpython cimport array
+from cpython cimport array
 #import array
 
 PPID = f'PPID:{os.getppid()}'
