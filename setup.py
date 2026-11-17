@@ -15,7 +15,6 @@ class NumpyBuildExtCommand(build_ext):
     def run(self):
         import numpy
 
-        self.distribution.fetch_build_eggs(["numpy"])
         self.include_dirs.append(numpy.get_include())
         build_ext.run(self)
 
